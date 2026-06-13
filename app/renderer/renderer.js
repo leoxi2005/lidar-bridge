@@ -60,33 +60,23 @@ const stw = (sx, sy) => {
 };
 
 // ---- point cloud store ----------------------------------------------------
-// One slot per angle bin holding the latest world point + arrival time, so the
-// progressive sweep-fade look from the prototype works with discrete scans.
+// One slot per angle bin holding the latest WORLD point (metres) + arrival time.
+// The pipeline (main process) already applied placement + mm->m, so the renderer
+// just plots; persistent slots keep the prototype's sweep-fade look across scans.
 const bins = new Array(NBINS).fill(null);
-let placement = { x: 0, y: 0, rot: 0 };
 
-function ingestScan(data) {
+function ingestScan(frame) {
   if (!ui.streaming) return;
   const now = performance.now();
-  const pts = data.points; // interleaved [angleDeg, distM, ...]
-  const cosR = Math.cos((placement.rot * Math.PI) / 180);
-  const sinR = Math.sin((placement.rot * Math.PI) / 180);
-  for (let i = 0; i < pts.length; i += 2) {
-    const aDeg = pts[i];
-    const d = pts[i + 1];
-    const a = (aDeg * Math.PI) / 180;
-    // sensor-local cartesian
-    const lx = Math.cos(a) * d;
-    const ly = Math.sin(a) * d;
-    // placement transform -> world (meters)
-    const wx = placement.x + lx * cosR - ly * sinR;
-    const wy = placement.y + lx * sinR + ly * cosR;
-    let idx = Math.round((aDeg / 360) * NBINS) % NBINS;
-    if (idx < 0) idx += NBINS;
-    bins[idx] = { x: wx, y: wy, t: now };
+  const pts = frame.pts; // [worldX, worldY, fg] per bin; fg < 0 = empty
+  const nb = frame.nbins;
+  for (let i = 0; i < nb; i++) {
+    const fg = pts[i * 3 + 2];
+    if (fg < 0) continue;
+    bins[i] = { x: pts[i * 3], y: pts[i * 3 + 1], fg, t: now };
   }
-  liveStats.points = data.count;
-  liveStats.latency = data.periodMs;
+  liveStats.points = frame.count;
+  liveStats.latency = frame.periodMs;
 }
 
 // ---- stats ----------------------------------------------------------------
@@ -236,7 +226,16 @@ function loadConnFields(id) {
   setCoord(c.coordSys);
   setQuality(c.quality);
   $('posX').value = '0.00'; $('posY').value = '0.00'; $('rot').value = '0.0';
-  placement = { x: 0, y: 0, rot: 0 };
+  pushPlacement();
+}
+
+function pushPlacement() {
+  const placement = {
+    x: parseFloat($('posX').value) || 0,
+    y: parseFloat($('posY').value) || 0,
+    rot: parseFloat($('rot').value) || 0,
+  };
+  window.lidar.setConfig({ placement });
 }
 
 function saveConnFields(id) {
@@ -303,6 +302,11 @@ async function doConnect() {
     distMax: $('distMax').value,
     quality,
     connType,
+    placement: {
+      x: parseFloat($('posX').value) || 0,
+      y: parseFloat($('posY').value) || 0,
+      rot: parseFloat($('rot').value) || 0,
+    },
   });
   setConnStatus('connecting…', '#ffb000');
   const res = await window.lidar.connect(cfg);
@@ -351,12 +355,14 @@ function wireControls() {
   $('distMin').onchange = pushDist;
   $('distMax').onchange = pushDist;
 
-  const pushPlacement = () => {
-    placement = { x: parseFloat($('posX').value) || 0, y: parseFloat($('posY').value) || 0, rot: parseFloat($('rot').value) || 0 };
-  };
   $('posX').onchange = pushPlacement;
   $('posY').onchange = pushPlacement;
   $('rot').onchange = pushPlacement;
+  $('autoLevel').onclick = () => {
+    $('posX').value = '0.00'; $('posY').value = '0.00'; $('rot').value = '0.0';
+    pushPlacement();
+    setConnStatus('placement re-levelled (0,0,0°)', '#9aa3ad');
+  };
 
   // stream toggle (freezes canvas + acquisition display)
   $('streamBtn').onclick = () => {

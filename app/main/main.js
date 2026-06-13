@@ -1,19 +1,14 @@
 'use strict';
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { RPLidar } = require('./rplidar');
 const { Simulator } = require('./simulator');
+const { Pipeline } = require('./pipeline');
 
 let win = null;
 let source = null; // active RPLidar | Simulator
-
-// Live acquisition config mirrored from the UI. Used for the FILTER stage.
-let cfg = {
-  quality: false, // quality filter on/off
-  distMin: 0.0, // meters
-  distMax: 25.0, // meters
-};
-
+const pipeline = new Pipeline();
 let lastScanAt = 0;
 
 function createWindow() {
@@ -24,6 +19,7 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: '#0a0b0e',
     title: 'LiDAR Bridge',
+    show: !process.env.LIDAR_AUTOSHOT,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
@@ -32,31 +28,20 @@ function createWindow() {
   });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.on('closed', () => (win = null));
+  if (process.env.LIDAR_AUTOSHOT) runAutoShot();
 }
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-// FILTER + TRANSFORM(mm->m) stage. Emits an interleaved Float32Array of
-// [angleDeg, distMeters, ...] so the renderer can apply live placement.
+// Full pipeline pass for one scan, then stream the frame to the renderer.
 function onScan(nodes) {
-  const out = new Float32Array(nodes.length * 2);
-  let n = 0;
-  for (const node of nodes) {
-    const distM = node.distMm / 1000;
-    if (distM <= 0) continue;
-    if (cfg.quality && node.quality < 150) continue;
-    if (distM < cfg.distMin || distM > cfg.distMax) continue;
-    out[n * 2] = node.angle;
-    out[n * 2 + 1] = distM;
-    n++;
-  }
-  const buf = out.subarray(0, n * 2);
+  const frame = pipeline.process(nodes);
   const now = Date.now();
-  const periodMs = lastScanAt ? now - lastScanAt : 0;
+  frame.periodMs = lastScanAt ? now - lastScanAt : 0;
   lastScanAt = now;
-  send('lidar:scan', { points: buf, count: n, periodMs });
+  send('lidar:scan', frame);
 }
 
 function wireSource(src) {
@@ -96,11 +81,12 @@ ipcMain.handle('lidar:list-ports', async () => {
 
 ipcMain.handle('lidar:connect', async (_evt, config) => {
   await teardownSource();
-  cfg = {
-    quality: !!config.quality,
-    distMin: parseFloat(config.distMin) || 0,
-    distMax: parseFloat(config.distMax) || 25,
-  };
+  pipeline.setConfig({
+    quality: config.quality,
+    distMin: config.distMin,
+    distMax: config.distMax,
+    placement: config.placement,
+  });
   lastScanAt = 0;
 
   const isSim =
@@ -115,7 +101,7 @@ ipcMain.handle('lidar:connect', async (_evt, config) => {
       return { ok: true, simulated: true, info };
     }
     if (config.connType === 'network') {
-      throw new Error('Network (TCP/UDP) acquisition is a later build step — use SERIAL or SIM for step 1.');
+      throw new Error('Network (TCP/UDP) acquisition is a later build step — use SERIAL or SIM.');
     }
     source = new RPLidar();
     wireSource(source);
@@ -135,12 +121,30 @@ ipcMain.handle('lidar:disconnect', async () => {
   return { ok: true };
 });
 
-ipcMain.handle('lidar:config', async (_evt, config) => {
-  if (config.quality !== undefined) cfg.quality = !!config.quality;
-  if (config.distMin !== undefined) cfg.distMin = parseFloat(config.distMin) || 0;
-  if (config.distMax !== undefined) cfg.distMax = parseFloat(config.distMax) || 25;
+ipcMain.handle('lidar:config', async (_evt, patch) => {
+  pipeline.setConfig(patch);
   return { ok: true };
 });
+
+// ---- verification screenshot (no screen-capture permission needed) -------
+async function runAutoShot() {
+  const out = process.env.LIDAR_AUTOSHOT;
+  try {
+    await new Promise((r) => win.webContents.once('did-finish-load', r));
+    await win.webContents.executeJavaScript("document.getElementById('connectBtn').click();");
+    await new Promise((r) => setTimeout(r, 2600));
+    if (process.env.LIDAR_SHOT_JS) {
+      await win.webContents.executeJavaScript(process.env.LIDAR_SHOT_JS);
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    const img = await win.webContents.capturePage();
+    fs.writeFileSync(out, img.toPNG());
+    console.log('SHOT_SAVED ' + out);
+  } catch (e) {
+    console.error('AUTOSHOT_ERROR', e);
+  }
+  app.quit();
+}
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', async () => {
