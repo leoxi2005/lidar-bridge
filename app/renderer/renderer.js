@@ -307,6 +307,74 @@ function warpFlip(horizontal) {
 function warpUndo() { if (!warp.undo.length) return; warp.redo.push(JSON.stringify(warp.corners)); warp.corners = JSON.parse(warp.undo.pop()); pushWarp(); updateWarpButtons(); }
 function warpRedo() { if (!warp.redo.length) return; warp.undo.push(JSON.stringify(warp.corners)); warp.corners = JSON.parse(warp.redo.pop()); pushWarp(); updateWarpButtons(); }
 
+// ---- visual output (window / extended / NDI) ------------------------------
+let outputMode = 'window';
+let projectorOpen = false;
+let ndiOn = false;
+const ndiCfg = { name: 'LidarBridge-Mapping', w: '1920', h: '1080', fps: '60', fit: 'fit' };
+
+function buildNdiConfig() {
+  const box = $('ndiConfig');
+  box.innerHTML =
+    `<label class="field"><span class="lbl">SOURCE NAME</span><input id="ndiName" class="input" value="${ndiCfg.name}"></label>
+     <div class="row">
+       <label class="field" style="flex:1"><span class="lbl">WIDTH</span><input id="ndiW" class="input" value="${ndiCfg.w}"></label>
+       <label class="field" style="flex:1"><span class="lbl">HEIGHT</span><input id="ndiH" class="input" value="${ndiCfg.h}"></label>
+       <label class="field" style="flex:1"><span class="lbl">FPS</span>
+         <div class="row"><button class="seg ndi-fps active" data-fps="60" style="font-size:9.5px">60</button><button class="seg ndi-fps" data-fps="30" style="font-size:9.5px">30</button></div>
+       </label>
+     </div>
+     <div style="display:flex;justify-content:space-between" class="mono"><span class="lbl">ASPECT</span><span id="ndiAspect" style="font-size:9.5px;color:#9fe4ef"></span></div>
+     <div class="row">
+       <button class="seg ndi-presets" data-preset="1280x720" style="font-size:9px">720p</button>
+       <button class="seg ndi-presets" data-preset="1920x1080" style="font-size:9px">1080p</button>
+       <button class="seg ndi-presets" data-preset="2560x1440" style="font-size:9px">1440p</button>
+       <button class="seg ndi-presets" data-preset="3840x2160" style="font-size:9px">4K</button>
+     </div>
+     <div class="row">
+       <button class="seg ndi-fit active" data-fit="fit" style="font-size:9.5px">FIT</button>
+       <button class="seg ndi-fit" data-fit="fill" style="font-size:9.5px">FILL</button>
+       <button class="seg ndi-fit" data-fit="stretch" style="font-size:9.5px">STRETCH</button>
+     </div>`;
+  const updAspect = () => {
+    const w = parseInt($('ndiW').value, 10) || 1, h = parseInt($('ndiH').value, 10) || 1;
+    const g = (a, b) => (b ? g(b, a % b) : a); const k = g(w, h) || 1;
+    $('ndiAspect').textContent = `${w} × ${h}  (${w / k}:${h / k})`;
+  };
+  $('ndiName').onchange = () => (ndiCfg.name = $('ndiName').value);
+  $('ndiW').oninput = () => { ndiCfg.w = $('ndiW').value; updAspect(); };
+  $('ndiH').oninput = () => { ndiCfg.h = $('ndiH').value; updAspect(); };
+  box.querySelectorAll('.ndi-presets').forEach((b) => b.onclick = () => {
+    const [w, h] = b.getAttribute('data-preset').split('x');
+    $('ndiW').value = w; $('ndiH').value = h; ndiCfg.w = w; ndiCfg.h = h; updAspect();
+  });
+  box.querySelectorAll('.ndi-fps').forEach((b) => b.onclick = () => { ndiCfg.fps = b.getAttribute('data-fps'); box.querySelectorAll('.ndi-fps').forEach((x) => x.classList.toggle('active', x === b)); });
+  box.querySelectorAll('.ndi-fit').forEach((b) => b.onclick = () => { ndiCfg.fit = b.getAttribute('data-fit'); box.querySelectorAll('.ndi-fit').forEach((x) => x.classList.toggle('active', x === b)); });
+  updAspect();
+}
+
+function updateOutputAction() {
+  const btn = $('outputAction');
+  if (outputMode === 'ndi') { btn.textContent = ndiOn ? 'STOP NDI STREAM' : 'START NDI STREAM'; }
+  else if (outputMode === 'extended') { btn.textContent = projectorOpen ? 'CLOSE OUTPUT' : 'OPEN ON EXTENDED DISPLAY'; }
+  else { btn.textContent = projectorOpen ? 'CLOSE OUTPUT' : 'OPEN OUTPUT WINDOW'; }
+}
+
+async function doOutputAction() {
+  if (outputMode === 'ndi') {
+    if (ndiOn) { await window.lidar.ndiStop(); ndiOn = false; $('ndiBadge').style.display = 'none'; }
+    else {
+      const res = await window.lidar.ndiStart(ndiCfg);
+      if (res.ok) { ndiOn = true; $('ndiBadge').style.display = 'flex'; }
+      else { setConnStatus(res.error, '#ffb000'); }
+    }
+    updateOutputAction();
+    return;
+  }
+  if (projectorOpen) { await window.lidar.closeOutput(); }
+  else { await window.lidar.openOutput(outputMode); }
+}
+
 // ---- output (OSC / TUIO) --------------------------------------------------
 const out = { protocol: 'osc', host: '127.0.0.1', port: '7000', sendRate: '30', normalize: false };
 
@@ -968,15 +1036,18 @@ function wireControls() {
   updateWarpSel();
   updateWarpButtons();
 
-  // output mode (action wired in step 8)
+  // output mode + action
+  buildNdiConfig();
   document.querySelectorAll('[data-omode]').forEach((b) => {
     b.onclick = () => {
-      const mode = b.getAttribute('data-omode');
+      outputMode = b.getAttribute('data-omode');
       document.querySelectorAll('[data-omode]').forEach((x) => x.classList.toggle('active', x === b));
-      $('ndiConfig').style.display = mode === 'ndi' ? 'flex' : 'none';
-      $('outputAction').textContent = mode === 'window' ? 'OPEN OUTPUT WINDOW' : mode === 'extended' ? 'OPEN ON EXTENDED DISPLAY' : 'START NDI STREAM';
+      $('ndiConfig').style.display = outputMode === 'ndi' ? 'flex' : 'none';
+      updateOutputAction();
     };
   });
+  $('outputAction').onclick = doOutputAction;
+  window.lidar.onProjectorState((stP) => { projectorOpen = stP.open; updateOutputAction(); });
 
   // keyboard: warp undo/redo
   window.addEventListener('keydown', (e) => {
@@ -988,11 +1059,10 @@ function wireControls() {
   $('drawNewZone').onclick = () => { switchTab('zones'); setTool('zone'); };
 
   $('protoPill').onclick = () => switchTab('output');
+  $('projectBtn').onclick = doOutputAction;
 
-  // inert buttons (later steps) — give honest feedback
-  ['projectBtn', 'recordBtn'].forEach((id) => {
-    $(id).onclick = () => setConnStatus($(id).textContent.trim() + ' — implemented in a later build step', '#717a84');
-  });
+  // inert button (record arrives in step 9)
+  $('recordBtn').onclick = () => setConnStatus('RECORD — implemented in build step 9', '#717a84');
 }
 
 function switchTab(name) {

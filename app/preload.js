@@ -11,6 +11,15 @@ contextBridge.exposeInMainWorld('lidar', {
   setZones: (zones) => ipcRenderer.invoke('lidar:zones', zones),
   setOutput: (cfg) => ipcRenderer.invoke('lidar:output', cfg),
   setWarp: (cfg) => ipcRenderer.invoke('lidar:warp', cfg),
+  openOutput: (mode) => ipcRenderer.invoke('lidar:open-output', mode),
+  closeOutput: () => ipcRenderer.invoke('lidar:close-output'),
+  ndiStart: (cfg) => ipcRenderer.invoke('lidar:ndi-start', cfg),
+  ndiStop: () => ipcRenderer.invoke('lidar:ndi-stop'),
+  onProjectorState: (cb) => {
+    const h = (_e, s) => cb(s);
+    ipcRenderer.on('lidar:projector-state', h);
+    return () => ipcRenderer.removeListener('lidar:projector-state', h);
+  },
   onOscLog: (cb) => {
     const h = (_e, lines) => cb(lines);
     ipcRenderer.on('lidar:osc-log', h);

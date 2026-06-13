@@ -1,11 +1,15 @@
 'use strict';
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { RPLidar } = require('./rplidar');
 const { Simulator } = require('./simulator');
 const { Pipeline } = require('./pipeline');
 const { OscSender, oscMessage, oscBundle } = require('./osc');
+const { applyH } = require('./homography');
+
+let projWin = null; // projector output window
+let ndi = null; // NDI sender (optional, requires grandiose + NDI SDK)
 
 let win = null;
 let source = null; // active RPLidar | Simulator
@@ -58,7 +62,41 @@ function onScan(nodes) {
     tracks: frame.tracks,
     zones: pipeline.zones.map((z, i) => ({ slug: z.slug, on: !!frame.zoneOcc[i] })),
   };
+
+  if (projWin && !projWin.isDestroyed()) {
+    projWin.webContents.send('projector:frame', {
+      warpEnabled: pipeline.warpEnabled,
+      tracks: frame.tracks.map((t) => ({ u: t.u, v: t.v, out: t.out, color: t.color, id: t.id })),
+      zones: pipeline.zones.map((z, i) => ({
+        name: z.name,
+        occupied: !!frame.zoneOcc[i],
+        uv: z.pts.map((p) => applyH(pipeline.warpH, p[0], p[1])),
+      })),
+    });
+  }
 }
+
+// ---- projector output window ---------------------------------------------
+function openProjector(mode) {
+  if (projWin && !projWin.isDestroyed()) { projWin.focus(); return; }
+  const o = {
+    width: 960, height: 600, frame: false, backgroundColor: '#000', title: 'LiDAR Bridge — Output',
+    webPreferences: { preload: path.join(__dirname, '..', 'projector-preload.js'), contextIsolation: true, nodeIntegration: false },
+  };
+  if (mode === 'extended') {
+    const displays = screen.getAllDisplays();
+    const primary = screen.getPrimaryDisplay();
+    const ext = displays.find((d) => d.id !== primary.id);
+    if (ext) { o.x = ext.bounds.x; o.y = ext.bounds.y; o.width = ext.bounds.width; o.height = ext.bounds.height; o.fullscreen = true; }
+  }
+  projWin = new BrowserWindow(o);
+  projWin.loadFile(path.join(__dirname, '..', 'renderer', 'projector.html'));
+  projWin.on('closed', () => { projWin = null; send('lidar:projector-state', { open: false }); });
+  send('lidar:projector-state', { open: true });
+}
+
+ipcMain.on('projector:exit', () => { if (projWin && !projWin.isDestroyed()) projWin.close(); });
+ipcMain.on('projector:fullscreen', () => { if (projWin && !projWin.isDestroyed()) projWin.setFullScreen(!projWin.isFullScreen()); });
 
 // ---- network output -------------------------------------------------------
 function startSender() {
@@ -219,6 +257,31 @@ ipcMain.handle('lidar:zones', async (_evt, zones) => {
   return { ok: true };
 });
 
+ipcMain.handle('lidar:open-output', async (_evt, mode) => {
+  openProjector(mode);
+  return { ok: true };
+});
+ipcMain.handle('lidar:close-output', async () => {
+  if (projWin && !projWin.isDestroyed()) projWin.close();
+  return { ok: true };
+});
+
+// NDI broadcast requires the NDI SDK + the native `grandiose` binding, which are not
+// bundled here. Load lazily and report cleanly if unavailable (no crash).
+ipcMain.handle('lidar:ndi-start', async (_evt, cfg) => {
+  try {
+    const grandiose = require('grandiose'); // optional dependency
+    ndi = await grandiose.send({ name: cfg.name || 'LidarBridge-Mapping' });
+    return { ok: true, active: true };
+  } catch (e) {
+    return { ok: false, error: 'NDI broadcast needs the NDI SDK + `grandiose` native module (not installed in this build). WINDOW / EXTENDED output work without it.' };
+  }
+});
+ipcMain.handle('lidar:ndi-stop', async () => {
+  ndi = null;
+  return { ok: true };
+});
+
 ipcMain.handle('lidar:warp', async (_evt, patch) => {
   pipeline.setWarp(patch);
   if (patch.enabled !== undefined) outCfg.normalize = !!patch.enabled; // "apply to output"
@@ -248,7 +311,9 @@ async function runAutoShot() {
       await win.webContents.executeJavaScript(process.env.LIDAR_SHOT_JS);
       await new Promise((r) => setTimeout(r, parseInt(process.env.LIDAR_SHOT_WAIT || '1200', 10)));
     }
-    const img = await win.webContents.capturePage();
+    let target = win;
+    if (process.env.LIDAR_SHOT_PROJ && projWin && !projWin.isDestroyed()) target = projWin;
+    const img = await target.webContents.capturePage();
     fs.writeFileSync(out, img.toPNG());
     console.log('SHOT_SAVED ' + out);
   } catch (e) {
