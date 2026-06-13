@@ -45,18 +45,21 @@ function draw() {
     }
   }
 
-  // border + registration targets
-  ctx.strokeStyle = 'rgba(0,229,255,0.6)'; ctx.lineWidth = 1.5; ctx.strokeRect(ox, oy, side, side);
-  [[0, 0], [1, 0], [1, 1], [0, 1]].forEach((c) => {
-    const [x, y] = m(c[0], c[1]);
-    ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.arc(x, y, 9, 0, 2 * Math.PI); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x - 13, y); ctx.lineTo(x + 13, y); ctx.moveTo(x, y - 13); ctx.lineTo(x, y + 13); ctx.stroke();
-    if (opts.labels) { ctx.fillStyle = '#7fd6e6'; ctx.font = "10px 'IBM Plex Mono'"; ctx.fillText('(' + c[0] + ',' + c[1] + ')', x + 12, y - 12); }
-  });
-  const [cx, cy] = m(0.5, 0.5);
-  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-  ctx.beginPath(); ctx.moveTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy + 10); ctx.stroke();
+  // calibration chrome (border, registration targets, centre crosshair) — only when
+  // GRID is on. Turn GRID off for a clean "mapped content only" projector feed.
+  if (opts.grid) {
+    ctx.strokeStyle = 'rgba(0,229,255,0.6)'; ctx.lineWidth = 1.5; ctx.strokeRect(ox, oy, side, side);
+    [[0, 0], [1, 0], [1, 1], [0, 1]].forEach((c) => {
+      const [x, y] = m(c[0], c[1]);
+      ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, 2 * Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - 13, y); ctx.lineTo(x + 13, y); ctx.moveTo(x, y - 13); ctx.lineTo(x, y + 13); ctx.stroke();
+      if (opts.labels) { ctx.fillStyle = '#7fd6e6'; ctx.font = "10px 'IBM Plex Mono'"; ctx.fillText('(' + c[0] + ',' + c[1] + ')', x + 12, y - 12); }
+    });
+    const [cx, cy] = m(0.5, 0.5);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.moveTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy + 10); ctx.stroke();
+  }
 
   // zones
   for (const z of frame.zones) {

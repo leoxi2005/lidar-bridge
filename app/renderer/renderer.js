@@ -271,6 +271,9 @@ function drawWarpOverlay(s) {
 }
 
 function pushWarp() { recomputeWarp(); window.lidar.setWarp({ corners: warp.corners, enabled: warp.enabled }); renderCornerInputs(); }
+// live update while dragging — push corners to main each move (no DOM rebuild) so the
+// output monitor / projector reposition tracked points in real time
+function pushWarpLive() { recomputeWarp(); window.lidar.setWarp({ corners: warp.corners, enabled: warp.enabled }); }
 function warpSnapshot() { warp.undo.push(JSON.stringify(warp.corners)); if (warp.undo.length > 80) warp.undo.shift(); warp.redo = []; updateWarpButtons(); }
 function setWarpEnabled(on) {
   warp.enabled = on;
@@ -1017,7 +1020,7 @@ function wireControls() {
         warp.corners[i][0] = warpScale.anchor[0] + (warpScale.snap[i][0] - warpScale.anchor[0]) * rx;
         warp.corners[i][1] = warpScale.anchor[1] + (warpScale.snap[i][1] - warpScale.anchor[1]) * ry;
       }
-      recomputeWarp();
+      pushWarpLive();
       return;
     }
     if (warpDrag) {
@@ -1028,7 +1031,7 @@ function wireControls() {
         warp.corners[i][0] = s[0] + dx;
         warp.corners[i][1] = s[1] + dy;
       }
-      recomputeWarp();
+      pushWarpLive();
       return;
     }
     if (warp.marquee) { warp.marquee.x1 = mx; warp.marquee.y1 = my; return; }
