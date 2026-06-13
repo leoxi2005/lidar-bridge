@@ -64,6 +64,7 @@ const stw = (sx, sy) => {
 // The pipeline (main process) already applied placement + mm->m, so the renderer
 // just plots; persistent slots keep the prototype's sweep-fade look across scans.
 const bins = new Array(NBINS).fill(null);
+const bg = { captured: false, subtract: false, tol: 0.18, contour: null, show: true, hide: true };
 
 function ingestScan(frame) {
   if (!ui.streaming) return;
@@ -77,6 +78,8 @@ function ingestScan(frame) {
   }
   liveStats.points = frame.count;
   liveStats.latency = frame.periodMs;
+  bg.contour = frame.bg || null;
+  syncBgUi(frame.bgCaptured, frame.capturing);
 }
 
 // ---- stats ----------------------------------------------------------------
@@ -115,8 +118,24 @@ function draw() {
     ctx.beginPath(); ctx.arc(ox, oy, r * s, 0, 2 * Math.PI); ctx.stroke();
   }
 
-  // point cloud (fresh = bright/white, fading to cyan then gone)
-  let visible = 0;
+  // captured background baseline (orange dashed ghost outline)
+  if (bg.captured && bg.show && bg.contour && bg.contour.length) {
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < bg.contour.length; i += 2) {
+      const [sx, sy] = wts(bg.contour[i], bg.contour[i + 1]);
+      i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
+    }
+    ctx.strokeStyle = 'rgba(255,176,0,0.32)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // point cloud. with subtraction on: foreground = green, background = dim/hidden.
+  const sub = bg.subtract && bg.captured;
   for (let i = 0; i < NBINS; i++) {
     const p = bins[i];
     if (!p) continue;
@@ -124,6 +143,18 @@ function draw() {
     if (age > POINT_FADE) continue;
     const fresh = Math.max(0, 1 - age / POINT_FADE);
     const [sx, sy] = wts(p.x, p.y);
+    const isBg = sub && p.fg === 0;
+    if (isBg && bg.hide) continue;
+    if (isBg) {
+      ctx.fillStyle = 'rgba(120,130,140,' + (0.1 + 0.12 * fresh) + ')';
+      ctx.fillRect(sx - 0.8, sy - 0.8, 1.6, 1.6);
+      continue;
+    }
+    if (sub && p.fg === 1) {
+      ctx.fillStyle = 'rgba(57,255,122,' + (0.3 + 0.7 * fresh) + ')';
+      ctx.fillRect(sx - 1.3, sy - 1.3, 2.8, 2.8);
+      continue;
+    }
     const a = 0.14 + 0.82 * fresh;
     if (fresh > 0.82) {
       ctx.fillStyle = 'rgba(210,248,255,' + a + ')';
@@ -132,7 +163,6 @@ function draw() {
       ctx.fillStyle = 'rgba(0,210,238,' + a + ')';
       ctx.fillRect(sx - 0.9, sy - 0.9, 1.8, 1.8);
     }
-    visible++;
   }
 
   // sweep line
@@ -280,6 +310,24 @@ function setQuality(v) {
   if (ui.connected) window.lidar.setConfig({ quality });
 }
 
+// ---- background mask ------------------------------------------------------
+function syncBgUi(captured, capturing) {
+  bg.captured = !!captured;
+  const status = $('bgStatus');
+  if (capturing) { status.textContent = 'CAPTURING…'; status.style.color = '#ffb000'; }
+  else if (captured) { status.textContent = 'CAPTURED'; status.style.color = '#39ff7a'; }
+  else { status.textContent = 'NO BASELINE'; status.style.color = '#5b636d'; }
+  $('bgControls').style.display = captured ? 'flex' : 'none';
+}
+function setBgSubtract(on) {
+  bg.subtract = on;
+  $('bgKnob').style.left = on ? '24px' : '2px';
+  $('bgKnob').style.background = on ? '#39ff7a' : '#717a84';
+  $('bgSubToggle').style.borderColor = on ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.12)';
+  $('bgSubToggle').style.background = on ? 'rgba(57,255,122,0.12)' : '#0e1216';
+  window.lidar.setConfig({ bgSubtract: on });
+}
+
 // ---- connect / disconnect -------------------------------------------------
 async function doConnect() {
   if (ui.connected) {
@@ -358,6 +406,25 @@ function wireControls() {
   $('posX').onchange = pushPlacement;
   $('posY').onchange = pushPlacement;
   $('rot').onchange = pushPlacement;
+  // background mask
+  $('captureBg').onclick = () => {
+    if (!ui.connected) { setConnStatus('connect a sensor first', '#ffb000'); return; }
+    window.lidar.captureBg();
+    syncBgUi(false, true);
+  };
+  $('bgSubToggle').onclick = () => setBgSubtract(!bg.subtract);
+  $('bgTol').oninput = () => {
+    bg.tol = parseFloat($('bgTol').value);
+    $('bgTolLabel').textContent = Math.round(bg.tol * 100) + ' cm';
+    window.lidar.setConfig({ bgTol: bg.tol });
+  };
+  $('clearBg').onclick = () => {
+    window.lidar.clearBg();
+    bg.subtract = false;
+    setBgSubtract(false);
+    syncBgUi(false, false);
+  };
+
   $('autoLevel').onclick = () => {
     $('posX').value = '0.00'; $('posY').value = '0.00'; $('rot').value = '0.0';
     pushPlacement();

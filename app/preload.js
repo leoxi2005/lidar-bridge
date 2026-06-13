@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('lidar', {
   connect: (config) => ipcRenderer.invoke('lidar:connect', config),
   disconnect: () => ipcRenderer.invoke('lidar:disconnect'),
   setConfig: (config) => ipcRenderer.invoke('lidar:config', config),
+  captureBg: () => ipcRenderer.invoke('lidar:bg-capture'),
+  clearBg: () => ipcRenderer.invoke('lidar:bg-clear'),
 
   onScan: (cb) => {
     const h = (_e, data) => cb(data);

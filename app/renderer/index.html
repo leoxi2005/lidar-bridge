@@ -194,10 +194,26 @@ select.input{ padding:0 6px; }
       </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 14px 8px">
-        <span class="sec-title">BACKGROUND MASK</span><span class="mono" style="font-size:9px;color:#5b636d">step 3</span>
+        <span class="sec-title">BACKGROUND MASK</span><span class="mono" id="bgStatus" style="font-size:9px;color:#5b636d">NO BASELINE</span>
       </div>
       <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
-        <button class="prim" disabled style="opacity:.45;cursor:not-allowed">CAPTURE BACKGROUND</button>
+        <button id="captureBg" class="prim">CAPTURE BACKGROUND</button>
+        <div id="bgControls" style="display:none;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:7px;background:#10141a;border:1px solid var(--border)">
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-weight:600;font-size:11.5px;color:#dbe1e8">Subtract background</span>
+              <span class="mono" style="font-size:9px;color:#5b636d">hide walls · keep moving objects</span>
+            </div>
+            <button id="bgSubToggle" style="width:46px;height:26px;border-radius:20px;border:1px solid rgba(255,255,255,0.12);background:#0e1216;cursor:pointer;position:relative;padding:0;flex:0 0 auto">
+              <span id="bgKnob" style="position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#717a84;transition:left .15s ease"></span>
+            </button>
+          </div>
+          <label class="field" style="gap:5px">
+            <div style="display:flex;justify-content:space-between"><span class="lbl">TOLERANCE</span><span class="mono" id="bgTolLabel" style="font-size:9.5px;color:#9fe4ef">18 cm</span></div>
+            <input id="bgTol" type="range" min="0.05" max="0.6" step="0.01" value="0.18" style="width:100%;accent-color:#39ff7a">
+          </label>
+          <button id="clearBg" class="ghost">CLEAR BACKGROUND</button>
+        </div>
       </div>
 
       <div style="padding:14px 14px 8px" class="sec-title">PLACEMENT · room map</div>

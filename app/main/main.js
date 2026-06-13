@@ -126,6 +126,16 @@ ipcMain.handle('lidar:config', async (_evt, patch) => {
   return { ok: true };
 });
 
+ipcMain.handle('lidar:bg-capture', async () => {
+  pipeline.captureBackground();
+  return { ok: true };
+});
+
+ipcMain.handle('lidar:bg-clear', async () => {
+  pipeline.clearBackground();
+  return { ok: true };
+});
+
 // ---- verification screenshot (no screen-capture permission needed) -------
 async function runAutoShot() {
   const out = process.env.LIDAR_AUTOSHOT;
@@ -135,7 +145,7 @@ async function runAutoShot() {
     await new Promise((r) => setTimeout(r, 2600));
     if (process.env.LIDAR_SHOT_JS) {
       await win.webContents.executeJavaScript(process.env.LIDAR_SHOT_JS);
-      await new Promise((r) => setTimeout(r, 1200));
+      await new Promise((r) => setTimeout(r, parseInt(process.env.LIDAR_SHOT_WAIT || '1200', 10)));
     }
     const img = await win.webContents.capturePage();
     fs.writeFileSync(out, img.toPNG());
