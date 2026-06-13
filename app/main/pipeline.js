@@ -23,6 +23,7 @@ const MAX_BLOB_RADIUS = 0.9; // reject wall/furniture clusters larger than a per
 const MAX_BLOB_POINTS = 90;
 const MAX_JUMP = 0.6; // nearest-neighbor gate
 const MAX_MISSED = 8; // drop a track after this many unmatched frames
+const CONFIRM_HITS = 4; // frames a blob must persist before it becomes a real track
 const TRACK_PALETTE = ['#00e5ff', '#39ff7a', '#ffb000', '#ff5d8f'];
 
 // DBSCAN over an array of [x,y] points -> array of clusters (arrays of indices).
@@ -100,7 +101,7 @@ class Pipeline {
 
     // tracking state
     this.tracks = [];
-    this._nextId = 1;
+    this._nextId = 0; // ids assigned lazily on confirmation, starting at 01
 
     // trigger zones: [{ name, slug, pts:[[x,y],...] }]
     this.zones = [];
@@ -217,11 +218,12 @@ class Pipeline {
     const blobs = this._clusterBlobs(fgPts);
     this._updateTracks(blobs, dtSec);
 
-    // ZONES: point-in-polygon occupancy per zone, and tag each track with its zone.
+    // ZONES: point-in-polygon occupancy per zone (confirmed tracks only).
+    const confirmed = this.confirmedTracks();
     const zoneOcc = this.zones.map(() => false);
-    for (const t of this.tracks) t.zone = '';
+    for (const t of confirmed) t.zone = '';
     this.zones.forEach((z, zi) => {
-      for (const t of this.tracks) {
+      for (const t of confirmed) {
         if (pointInPoly(t.x, t.y, z.pts)) {
           zoneOcc[zi] = true;
           if (!t.zone) t.zone = z.name;
@@ -236,7 +238,7 @@ class Pipeline {
       bgCaptured: this.bgCaptured,
       capturing,
       zoneOcc,
-      tracks: this.tracks.map((t) => {
+      tracks: confirmed.map((t) => {
         const [u, v] = applyH(this.warpH, t.x, t.y);
         return {
           id: t.id,
@@ -293,6 +295,8 @@ class Pipeline {
   }
 
   // Nearest-neighbor assignment with a max-jump gate; age out missing tracks.
+  // A track must persist CONFIRM_HITS frames before it gets a (small, stable) public
+  // id — this kills the flicker/noise that otherwise spawns thousands of throwaway IDs.
   _updateTracks(blobs, dt) {
     const used = new Set();
     for (const t of this.tracks) {
@@ -307,25 +311,27 @@ class Pipeline {
         const b = blobs[best];
         used.add(best);
         if (dt > 0) {
-          // EMA-smoothed velocity (m/s)
           t.vx = 0.6 * t.vx + 0.4 * ((b.x - t.x) / dt);
           t.vy = 0.6 * t.vy + 0.4 * ((b.y - t.y) / dt);
         }
-        t.x = b.x; t.y = b.y; t.r = b.r; t.missed = 0;
+        t.x = b.x; t.y = b.y; t.r = b.r; t.missed = 0; t.hits++;
+        if (!t.id && t.hits >= CONFIRM_HITS) {
+          t.id = String(++this._nextId).padStart(2, '0');
+          t.color = TRACK_PALETTE[(this._nextId - 1) % TRACK_PALETTE.length];
+        }
       } else {
         t.missed++;
       }
     }
     blobs.forEach((b, i) => {
       if (used.has(i)) return;
-      const id = String(this._nextId++).padStart(2, '0');
-      this.tracks.push({
-        id, x: b.x, y: b.y, r: b.r, vx: 0, vy: 0, missed: 0,
-        color: TRACK_PALETTE[(this.tracks.length) % TRACK_PALETTE.length],
-      });
+      this.tracks.push({ id: null, color: null, x: b.x, y: b.y, r: b.r, vx: 0, vy: 0, missed: 0, hits: 1 });
     });
     this.tracks = this.tracks.filter((t) => t.missed < MAX_MISSED);
   }
+
+  // confirmed tracks only (have a public id)
+  confirmedTracks() { return this.tracks.filter((t) => t.id); }
 }
 
 module.exports = { Pipeline, NBINS, angleToBin };

@@ -25,7 +25,8 @@ let lastScanAt = 0;
 
 // network output
 const sender = new OscSender();
-let outCfg = { protocol: 'osc', host: '127.0.0.1', port: 7000, sendRate: 30, normalize: false };
+let outCfg = { protocol: 'osc', host: '127.0.0.1', port: 7000, sendRate: 30, normalize: false, format: 'perid' };
+const MAX_SLOTS = 16; // fixed instancing slots (stable channel set in TD)
 let sendTimer = null;
 let tuioFseq = 0;
 let lastLogAt = 0;
@@ -124,6 +125,29 @@ function emitOutput() {
   // Coordinate is normalized u,v in [0,1] when warp "apply to output" is on (step 7),
   // otherwise raw world metres.
   const coord = (t) => (outCfg.normalize && t.u != null ? [t.u, t.v] : [t.x, t.y]);
+
+  // INSTANCING mode (OSC only): fixed slots p0..pN with a stable channel set, ideal
+  // for driving Geometry instancing in TouchDesigner. Empty slots send on=0.
+  if (outCfg.protocol === 'osc' && outCfg.format === 'slots') {
+    const ts = latestOut.tracks;
+    sender.sendMessage('/lidar/count', [{ type: 'i', value: ts.length }]);
+    for (let i = 0; i < MAX_SLOTS; i++) {
+      const t = ts[i];
+      const [a, b] = t ? coord(t) : [0, 0];
+      sender.sendMessage(`/lidar/p${i}/on`, [{ type: 'i', value: t ? 1 : 0 }]);
+      sender.sendMessage(`/lidar/p${i}/x`, [{ type: 'f', value: a }]);
+      sender.sendMessage(`/lidar/p${i}/y`, [{ type: 'f', value: b }]);
+      sender.sendMessage(`/lidar/p${i}/v`, [{ type: 'f', value: t ? (t.vel || 0) : 0 }]);
+      sender.sendMessage(`/lidar/p${i}/id`, [{ type: 'i', value: t ? parseInt(t.id, 10) : 0 }]);
+    }
+    for (const z of latestOut.zones) sender.sendMessage(`/lidar/zone/${z.slug}`, [{ type: 'i', value: z.on ? 1 : 0 }]);
+    lines.push(`/lidar/count  ${ts.length}`);
+    ts.slice(0, 3).forEach((t, i) => { const [a, b] = coord(t); lines.push(`/lidar/p${i}/{on,x,y,v,id}  1 ${a.toFixed(2)} ${b.toFixed(2)} ${(t.vel || 0).toFixed(2)} ${t.id}`); });
+    for (const z of latestOut.zones) lines.push(`/lidar/zone/${z.slug}  ${z.on ? 1 : 0}`);
+    const nowS = Date.now();
+    if (lines.length && nowS - lastLogAt > 140) { lastLogAt = nowS; send('lidar:osc-log', lines); }
+    return;
+  }
 
   if (outCfg.protocol === 'tuio') {
     const msgs = [];
@@ -351,6 +375,7 @@ ipcMain.handle('lidar:output', async (_evt, patch) => {
   if (patch.port !== undefined) outCfg.port = parseInt(patch.port, 10) || outCfg.port;
   if (patch.sendRate !== undefined) outCfg.sendRate = parseInt(patch.sendRate, 10) || outCfg.sendRate;
   if (patch.normalize !== undefined) outCfg.normalize = !!patch.normalize;
+  if (patch.format !== undefined) outCfg.format = patch.format;
   sender.configure({ host: outCfg.host, port: outCfg.port });
   if (rateChanged && sendTimer) startSender();
   return { ok: true };

@@ -395,7 +395,7 @@ async function doOutputAction() {
 }
 
 // ---- output (OSC / TUIO) --------------------------------------------------
-const out = { protocol: 'osc', host: '127.0.0.1', port: '7000', sendRate: '30', normalize: false };
+const out = { protocol: 'osc', host: '127.0.0.1', port: '7000', sendRate: '30', normalize: false, format: 'perid' };
 
 function pushOutput() {
   window.lidar.setOutput(out);
@@ -409,6 +409,7 @@ function updateOscPreview() {
   const pre = $('oscPreview');
   const c = out.normalize ? 'u  v' : 'x  y';
   if (out.protocol === 'tuio') pre.textContent = '/tuio/2Dobj set <s> <c> ' + (out.normalize ? 'u v' : 'x y') + ' …\n/tuio/2Dobj alive […]  +  fseq <n>';
+  else if (out.format === 'slots') pre.textContent = '/lidar/count  <n>\n/lidar/p0/on  /lidar/p0/x  /lidar/p0/y  /lidar/p0/v  /lidar/p0/id\n… p0..p15 (fixed slots) · /lidar/zone/<slug> 0|1';
   else pre.textContent = '/lidar/trk/<id>  ' + c + '  vel\n/lidar/zone/<slug>  0|1';
 }
 function appendOscLog(lines) {
@@ -1051,6 +1052,14 @@ function wireControls() {
     b.onclick = () => {
       out.sendRate = b.getAttribute('data-rate');
       document.querySelectorAll('[data-rate]').forEach((x) => x.classList.toggle('active', x === b));
+      pushOutput();
+    };
+  });
+  document.querySelectorAll('[data-format]').forEach((b) => {
+    b.onclick = () => {
+      out.format = b.getAttribute('data-format');
+      document.querySelectorAll('[data-format]').forEach((x) => x.classList.toggle('active', x === b));
+      updateOscPreview();
       pushOutput();
     };
   });
