@@ -955,7 +955,7 @@ function wireControls() {
   }, { passive: false });
 
   let dragging = false, lastX = 0, lastY = 0;
-  let warpDrag = false, warpLast = null, warpScale = null;
+  let warpDrag = null, warpScale = null; // warpDrag = { origin:[wx,wy], starts:{i:[x,y]} }
   wrap.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     const r = wrap.getBoundingClientRect();
@@ -981,7 +981,10 @@ function wireControls() {
       warp.corners.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); if (Math.hypot(sx - mx, sy - my) <= 10) hit = i; });
       if (hit >= 0) {
         if (warp.sel.indexOf(hit) < 0) warp.sel = e.shiftKey ? warp.sel.concat(hit) : [hit];
-        warpDrag = true; warpLast = stw(mx, my); warpSnapshot(); updateWarpSel();
+        const o = stw(mx, my);
+        warpDrag = { origin: o, starts: {} };
+        for (const i of warp.sel) warpDrag.starts[i] = warp.corners[i].slice();
+        warpSnapshot(); updateWarpSel();
       } else {
         if (!e.shiftKey) warp.sel = [];
         warp.marquee = { x0: mx, y0: my, x1: mx, y1: my }; updateWarpSel();
@@ -992,7 +995,7 @@ function wireControls() {
   });
   window.addEventListener('mouseup', (e) => {
     if (warpScale) { warpScale = null; pushWarp(); }
-    if (warpDrag) { warpDrag = false; pushWarp(); }
+    if (warpDrag) { warpDrag = null; pushWarp(); }
     if (warp.marquee) {
       const m = warp.marquee;
       const x0 = Math.min(m.x0, m.x1), x1 = Math.max(m.x0, m.x1), y0 = Math.min(m.y0, m.y1), y1 = Math.max(m.y0, m.y1);
@@ -1018,9 +1021,14 @@ function wireControls() {
       return;
     }
     if (warpDrag) {
-      const dx = wx - warpLast[0], dy = wy - warpLast[1];
-      for (const i of warp.sel) { warp.corners[i][0] += dx; warp.corners[i][1] += dy; }
-      warpLast = [wx, wy]; recomputeWarp();
+      let dx = wx - warpDrag.origin[0], dy = wy - warpDrag.origin[1];
+      if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; } // axis-lock
+      for (const i of warp.sel) {
+        const s = warpDrag.starts[i];
+        warp.corners[i][0] = s[0] + dx;
+        warp.corners[i][1] = s[1] + dy;
+      }
+      recomputeWarp();
       return;
     }
     if (warp.marquee) { warp.marquee.x1 = mx; warp.marquee.y1 = my; return; }

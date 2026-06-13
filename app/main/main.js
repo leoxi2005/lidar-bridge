@@ -26,7 +26,8 @@ let lastScanAt = 0;
 // network output
 const sender = new OscSender();
 let outCfg = { protocol: 'osc', host: '127.0.0.1', port: 7000, sendRate: 30, normalize: false, format: 'perid' };
-const MAX_SLOTS = 16; // fixed instancing slots (stable channel set in TD)
+const MAX_SLOTS = 64; // safety cap on instancing slots
+let peakSlots = 0; // high-water mark of concurrent tracks this session (auto-sizes the slot set)
 let sendTimer = null;
 let tuioFseq = 0;
 let lastLogAt = 0;
@@ -110,6 +111,7 @@ ipcMain.on('projector:fullscreen', () => { if (projWin && !projWin.isDestroyed()
 // ---- network output -------------------------------------------------------
 function startSender() {
   stopSender();
+  peakSlots = 0;
   sender.configure({ host: outCfg.host, port: outCfg.port });
   const hz = Math.max(1, Math.min(120, outCfg.sendRate));
   sendTimer = setInterval(emitOutput, 1000 / hz);
@@ -130,8 +132,11 @@ function emitOutput() {
   // for driving Geometry instancing in TouchDesigner. Empty slots send on=0.
   if (outCfg.protocol === 'osc' && outCfg.format === 'slots') {
     const ts = latestOut.tracks;
+    // grow the slot set to the busiest moment seen (never shrink → stable channels),
+    // so we don't hard-cap or waste channels far above the real count.
+    peakSlots = Math.min(MAX_SLOTS, Math.max(peakSlots, ts.length));
     sender.sendMessage('/lidar/count', [{ type: 'i', value: ts.length }]);
-    for (let i = 0; i < MAX_SLOTS; i++) {
+    for (let i = 0; i < peakSlots; i++) {
       const t = ts[i];
       const [a, b] = t ? coord(t) : [0, 0];
       sender.sendMessage(`/lidar/p${i}/on`, [{ type: 'i', value: t ? 1 : 0 }]);
