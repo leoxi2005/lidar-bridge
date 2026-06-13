@@ -390,6 +390,17 @@ select.input{ padding:0 6px; }
       </div>
     </div>
   </div>
+
+  <!-- BOTTOM TRANSPORT -->
+  <div style="height:62px;flex:0 0 auto;background:#0e1115;border-top:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 16px">
+    <button id="recBtn2" class="btn red" style="height:32px"><span class="dot" id="recDot" style="background:#ff4d5e"></span><span id="recBtn2Label">RECORD</span></button>
+    <span class="mono" id="timecode" style="font-size:13px;color:#e8ecf1;min-width:52px">00:00</span>
+    <div id="timeline" style="flex:1;height:8px;border-radius:5px;background:#0b0e11;border:1px solid var(--border);position:relative;cursor:pointer;overflow:hidden">
+      <div id="playhead" style="position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,rgba(0,229,255,0.25),rgba(0,229,255,0.5))"></div>
+    </div>
+    <button id="playBtn" class="btn" style="width:36px;justify-content:center" title="play last take">▶</button>
+    <div id="takes" class="mono" style="display:flex;gap:6px;align-items:center;max-width:320px;overflow-x:auto"></div>
+  </div>
 </div>
 <script src="./renderer.js"></script>
 </body>

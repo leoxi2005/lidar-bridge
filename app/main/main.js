@@ -11,6 +11,13 @@ const { applyH } = require('./homography');
 let projWin = null; // projector output window
 let ndi = null; // NDI sender (optional, requires grandiose + NDI SDK)
 
+// record / playback of raw scan sessions
+let recording = false;
+let recStart = 0;
+let recFrames = [];
+let takes = []; // [{ id, name, durMs, frames:[{t, nodes}] }]
+let takeSeq = 0;
+
 let win = null;
 let source = null; // active RPLidar | Simulator
 const pipeline = new Pipeline();
@@ -51,6 +58,7 @@ function send(channel, payload) {
 // Full pipeline pass for one scan, then stream the frame to the renderer.
 function onScan(nodes) {
   const now = Date.now();
+  if (recording) recFrames.push({ t: now - recStart, nodes });
   const periodMs = lastScanAt ? now - lastScanAt : 100;
   lastScanAt = now;
   const dtSec = Math.min(0.5, periodMs / 1000);
@@ -255,6 +263,54 @@ ipcMain.handle('lidar:bg-clear', async () => {
 ipcMain.handle('lidar:zones', async (_evt, zones) => {
   pipeline.setZones(zones);
   return { ok: true };
+});
+
+// Replays a recorded take through the same pipeline, emitting `scan` like a real
+// source (loops). Reuses the EventEmitter source contract.
+const { EventEmitter } = require('events');
+class PlaybackSource extends EventEmitter {
+  constructor(frames) { super(); this.frames = frames; this.connected = false; this._timer = null; this.info = { firmware: 'PLAYBACK', model: 0 }; }
+  async connect() {
+    this.connected = true;
+    this.emit('info', this.info);
+    this.emit('status', 'playing take');
+    let i = 0;
+    const dur = this.frames.length ? this.frames[this.frames.length - 1].t + 100 : 100;
+    const t0 = Date.now();
+    this._timer = setInterval(() => {
+      const elapsed = (Date.now() - t0) % dur;
+      // emit all frames whose timestamp passed since last tick (cheap: advance index)
+      while (i < this.frames.length && this.frames[i].t <= elapsed) { this.emit('scan', this.frames[i].nodes); i++; }
+      if (i >= this.frames.length) i = 0; // loop
+    }, 33);
+    return this.info;
+  }
+  async disconnect() { this.connected = false; if (this._timer) clearInterval(this._timer); this._timer = null; }
+}
+
+ipcMain.handle('lidar:record-start', async () => {
+  recording = true; recStart = Date.now(); recFrames = [];
+  return { ok: true };
+});
+ipcMain.handle('lidar:record-stop', async () => {
+  recording = false;
+  if (!recFrames.length) return { ok: true, take: null };
+  const durMs = recFrames[recFrames.length - 1].t;
+  const id = ++takeSeq;
+  const take = { id, name: 'Take ' + String(id).padStart(2, '0'), durMs, frames: recFrames };
+  takes.push(take);
+  recFrames = [];
+  return { ok: true, take: { id: take.id, name: take.name, durMs } };
+});
+ipcMain.handle('lidar:play-take', async (_evt, id) => {
+  const take = takes.find((t) => t.id === id);
+  if (!take) return { ok: false, error: 'take not found' };
+  await teardownSource();
+  source = new PlaybackSource(take.frames);
+  wireSource(source);
+  await source.connect();
+  startSender();
+  return { ok: true, durMs: take.durMs };
 });
 
 ipcMain.handle('lidar:open-output', async (_evt, mode) => {

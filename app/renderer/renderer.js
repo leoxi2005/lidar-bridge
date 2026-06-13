@@ -243,6 +243,25 @@ function drawWarpOverlay(s) {
       ctx.fillStyle = isSel ? '#ffffff' : (on ? '#bff3fb' : '#b9c6cd'); ctx.fillText('(' + WARP_TARGETS[i] + ')', sx, sy - 14);
     }
   });
+  // bounding box + scale handles (when >=2 corners selected)
+  if (interactive && warp.sel.length >= 2) {
+    const xs = warp.sel.map((i) => c[i][0]), ys = warp.sel.map((i) => c[i][1]);
+    const bx0 = Math.min.apply(null, xs), bx1 = Math.max.apply(null, xs), by0 = Math.min.apply(null, ys), by1 = Math.max.apply(null, ys);
+    const bcw = [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]];
+    const q = bcw.map((p) => wts(p[0], p[1]));
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1;
+    ctx.beginPath(); q.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+    const cenx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, ceny = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+    const OFF = 16;
+    warp._bbox = bcw.map((cw, i) => {
+      let hx = q[i][0], hy = q[i][1]; const vx = hx - cenx, vy = hy - ceny, L = Math.hypot(vx, vy) || 1;
+      hx += (vx / L) * OFF; hy += (vy / L) * OFF;
+      const aw = [cw[0] === bx0 ? bx1 : bx0, cw[1] === by0 ? by1 : by0]; // opposite corner (world)
+      return { sx: hx, sy: hy, cw, aw };
+    });
+    for (const h of warp._bbox) { ctx.fillStyle = '#fff'; ctx.fillRect(h.sx - 4, h.sy - 4, 8, 8); ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.5; ctx.strokeRect(h.sx - 4, h.sy - 4, 8, 8); }
+  } else { warp._bbox = null; }
+
   // marquee
   if (warp.marquee) {
     const m = warp.marquee, x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1), w = Math.abs(m.x1 - m.x0), h = Math.abs(m.y1 - m.y0);
@@ -935,7 +954,7 @@ function wireControls() {
   }, { passive: false });
 
   let dragging = false, lastX = 0, lastY = 0;
-  let warpDrag = false, warpLast = null;
+  let warpDrag = false, warpLast = null, warpScale = null;
   wrap.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     const r = wrap.getBoundingClientRect();
@@ -947,6 +966,16 @@ function wireControls() {
       return;
     }
     if (warpInteractive()) {
+      // scale handle?
+      if (warp._bbox) {
+        for (const h of warp._bbox) {
+          if (Math.hypot(h.sx - mx, h.sy - my) <= 8) {
+            warpScale = { anchor: h.aw.slice(), ref: h.cw.slice(), snap: warp.corners.map((cc) => cc.slice()) };
+            warpSnapshot();
+            return;
+          }
+        }
+      }
       let hit = -1;
       warp.corners.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); if (Math.hypot(sx - mx, sy - my) <= 10) hit = i; });
       if (hit >= 0) {
@@ -961,6 +990,7 @@ function wireControls() {
     dragging = true; lastX = e.clientX; lastY = e.clientY;
   });
   window.addEventListener('mouseup', (e) => {
+    if (warpScale) { warpScale = null; pushWarp(); }
     if (warpDrag) { warpDrag = false; pushWarp(); }
     if (warp.marquee) {
       const m = warp.marquee;
@@ -976,6 +1006,16 @@ function wireControls() {
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     const [wx, wy] = stw(mx, my);
     $('cursor').textContent = `x ${wx.toFixed(2)}  y ${wy.toFixed(2)}`;
+    if (warpScale) {
+      const rx = (wx - warpScale.anchor[0]) / ((warpScale.ref[0] - warpScale.anchor[0]) || 1e-6);
+      const ry = (wy - warpScale.anchor[1]) / ((warpScale.ref[1] - warpScale.anchor[1]) || 1e-6);
+      for (const i of warp.sel) {
+        warp.corners[i][0] = warpScale.anchor[0] + (warpScale.snap[i][0] - warpScale.anchor[0]) * rx;
+        warp.corners[i][1] = warpScale.anchor[1] + (warpScale.snap[i][1] - warpScale.anchor[1]) * ry;
+      }
+      recomputeWarp();
+      return;
+    }
     if (warpDrag) {
       const dx = wx - warpLast[0], dy = wy - warpLast[1];
       for (const i of warp.sel) { warp.corners[i][0] += dx; warp.corners[i][1] += dy; }
@@ -1061,8 +1101,11 @@ function wireControls() {
   $('protoPill').onclick = () => switchTab('output');
   $('projectBtn').onclick = doOutputAction;
 
-  // inert button (record arrives in step 9)
-  $('recordBtn').onclick = () => setConnStatus('RECORD — implemented in build step 9', '#717a84');
+  // record / playback
+  $('recordBtn').onclick = toggleRecord;
+  $('recBtn2').onclick = toggleRecord;
+  $('playBtn').onclick = () => { if (rec.takes.length) playTake(rec.takes[rec.takes.length - 1].id); };
+  startTransportLoop();
 }
 
 function switchTab(name) {
@@ -1075,6 +1118,62 @@ function renderStreamGlyph() {
   $('streamGlyph').innerHTML = ui.streaming
     ? '<span style="display:flex;gap:2.5px"><span style="width:3px;height:11px;background:#00e5ff;display:block"></span><span style="width:3px;height:11px;background:#00e5ff;display:block"></span></span>'
     : '<span style="width:0;height:0;border-left:9px solid #00e5ff;border-top:6px solid transparent;border-bottom:6px solid transparent;display:block"></span>';
+}
+
+// ---- record / playback ----------------------------------------------------
+const rec = { recording: false, start: 0, takes: [], playing: false, playStart: 0, playDur: 0 };
+const fmtTime = (ms) => { const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+
+async function toggleRecord() {
+  if (rec.recording) {
+    rec.recording = false; setRecUi(false);
+    const res = await window.lidar.recordStop();
+    if (res.take) { rec.takes.push(res.take); renderTakes(); }
+  } else {
+    if (!ui.connected) { setConnStatus('connect a source first', '#ffb000'); return; }
+    await window.lidar.recordStart();
+    rec.recording = true; rec.playing = false; rec.start = performance.now(); setRecUi(true);
+  }
+}
+function setRecUi(on) {
+  $('recBtn2Label').textContent = on ? 'STOP' : 'RECORD';
+  $('recBtn').lastElementChild.textContent = on ? 'STOP' : 'RECORD';
+  $('recDot').style.animation = on ? 'blink 1s infinite' : 'none';
+}
+function renderTakes() {
+  const box = $('takes');
+  box.innerHTML = '';
+  rec.takes.forEach((t) => {
+    const chip = document.createElement('button');
+    chip.className = 'btn';
+    chip.style.cssText = 'height:26px;padding:0 9px';
+    chip.innerHTML = `<span style="color:#cdd4dc">${t.name}</span> <span style="color:#5b636d">${fmtTime(t.durMs)}</span>`;
+    chip.onclick = () => playTake(t.id);
+    box.appendChild(chip);
+  });
+}
+async function playTake(id) {
+  const res = await window.lidar.playTake(id);
+  if (res.ok) {
+    rec.playing = true; rec.playStart = performance.now(); rec.playDur = res.durMs || 1000;
+    ui.connected = true;
+    const t = rec.takes.find((x) => x.id === id);
+    setConnStatus('▶ playing ' + (t ? t.name : 'take'), '#9fe4ef');
+  } else setConnStatus(res.error || 'play failed', '#ff4d5e');
+}
+function startTransportLoop() {
+  setInterval(() => {
+    const tc = $('timecode'), ph = $('playhead');
+    if (rec.recording) {
+      tc.textContent = fmtTime(performance.now() - rec.start);
+      ph.style.background = 'rgba(255,77,94,0.4)'; ph.style.width = '100%';
+    } else if (rec.playing) {
+      const ms = (performance.now() - rec.playStart) % (rec.playDur || 1);
+      tc.textContent = fmtTime(ms);
+      ph.style.background = 'linear-gradient(90deg,rgba(0,229,255,0.25),rgba(0,229,255,0.5))';
+      ph.style.width = (100 * ms / (rec.playDur || 1)) + '%';
+    } else { ph.style.width = '0'; }
+  }, 120);
 }
 
 // ---- ports ----------------------------------------------------------------

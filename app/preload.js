@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('lidar', {
   closeOutput: () => ipcRenderer.invoke('lidar:close-output'),
   ndiStart: (cfg) => ipcRenderer.invoke('lidar:ndi-start', cfg),
   ndiStop: () => ipcRenderer.invoke('lidar:ndi-stop'),
+  recordStart: () => ipcRenderer.invoke('lidar:record-start'),
+  recordStop: () => ipcRenderer.invoke('lidar:record-stop'),
+  playTake: (id) => ipcRenderer.invoke('lidar:play-take', id),
   onProjectorState: (cb) => {
     const h = (_e, s) => cb(s);
     ipcRenderer.on('lidar:projector-state', h);
