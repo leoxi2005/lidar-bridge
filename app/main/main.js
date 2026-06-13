@@ -138,6 +138,11 @@ ipcMain.handle('lidar:bg-clear', async () => {
   return { ok: true };
 });
 
+ipcMain.handle('lidar:zones', async (_evt, zones) => {
+  pipeline.setZones(zones);
+  return { ok: true };
+});
+
 // ---- verification screenshot (no screen-capture permission needed) -------
 async function runAutoShot() {
   const out = process.env.LIDAR_AUTOSHOT;

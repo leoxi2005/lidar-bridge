@@ -67,6 +67,8 @@ const bins = new Array(NBINS).fill(null);
 const bg = { captured: false, subtract: false, tol: 0.18, contour: null, show: true, hide: true };
 let tracks = [];
 const trails = new Map(); // id -> [[x,y], ...] motion trail
+let zones = []; // [{ name, slug, pts:[[x,y]], visible, occupied }]
+let draft = []; // world points of the zone being drawn
 
 function ingestScan(frame) {
   if (!ui.streaming) return;
@@ -86,7 +88,80 @@ function ingestScan(frame) {
   tracks = frame.tracks || [];
   updateTrails(tracks);
   renderTrackTable(tracks);
+
+  if (frame.zoneOcc) {
+    let changed = false;
+    for (let i = 0; i < zones.length; i++) {
+      const o = !!frame.zoneOcc[i];
+      if (zones[i].occupied !== o) { zones[i].occupied = o; changed = true; }
+    }
+    if (changed) updateZoneBadges();
+  }
 }
+
+// ---- zones ----------------------------------------------------------------
+const slugify = (s) => s.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+function pushZones() {
+  window.lidar.setZones(zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts })));
+}
+
+function addZone(pts) {
+  const name = 'Zone ' + (zones.length + 1);
+  zones.push({ name, slug: slugify(name), pts, visible: true, occupied: false });
+  pushZones();
+  renderZoneCards();
+}
+
+function renderZoneCards() {
+  const list = $('zoneList');
+  list.innerHTML = '';
+  zones.forEach((z, i) => {
+    const card = document.createElement('div');
+    const border = z.occupied ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)';
+    card.style.cssText = `padding:10px 11px;border-radius:8px;background:#10141a;border:1px solid ${border};display:flex;flex-direction:column;gap:8px`;
+    card.innerHTML =
+      `<div style="display:flex;align-items:center;gap:9px">
+         <button class="zone-eye" data-i="${i}" title="visibility" style="width:22px;height:22px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:${z.visible ? 'rgba(0,229,255,0.12)' : '#0e1216'};color:${z.visible ? '#a9e8f1' : '#5b636d'};cursor:pointer;font-size:11px;padding:0;display:flex;align-items:center;justify-content:center;flex:0 0 auto">${z.visible ? '◉' : '○'}</button>
+         <span style="flex:1;font-weight:600;font-size:12.5px;color:#dbe1e8">${z.name}</span>
+         <span class="zone-badge" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 8px;border-radius:20px;background:${z.occupied ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.05)'};color:${z.occupied ? '#bff3fb' : '#717a84'}">${z.occupied ? 'TRIGGERED' : 'IDLE'}</span>
+       </div>
+       <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5b636d">
+         <span>${z.pts.length} vertices</span><span style="color:#717a84">/lidar/zone/${z.slug}</span>
+       </div>`;
+    list.appendChild(card);
+  });
+  list.querySelectorAll('.zone-eye').forEach((b) => {
+    b.onclick = () => { const i = +b.getAttribute('data-i'); zones[i].visible = !zones[i].visible; renderZoneCards(); };
+  });
+  $('zoneEmpty').style.display = zones.length ? 'none' : 'block';
+}
+
+function updateZoneBadges() {
+  const cards = $('zoneList').children;
+  for (let i = 0; i < zones.length && i < cards.length; i++) {
+    const badge = cards[i].querySelector('.zone-badge');
+    if (!badge) continue;
+    const o = zones[i].occupied;
+    badge.textContent = o ? 'TRIGGERED' : 'IDLE';
+    badge.style.background = o ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.05)';
+    badge.style.color = o ? '#bff3fb' : '#717a84';
+    cards[i].style.borderColor = o ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)';
+  }
+}
+
+function setTool(tool) {
+  ui.tool = tool;
+  document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-tool') === tool));
+  if (tool === 'zone') { draft = []; $('draftBanner').style.display = 'flex'; $('draftCount').textContent = '0 pts'; }
+  else { draft = []; $('draftBanner').style.display = 'none'; }
+}
+
+function finishZone() {
+  if (draft.length >= 3) addZone(draft.slice());
+  setTool('select');
+}
+function cancelDraft() { setTool('select'); }
 
 function updateTrails(ts) {
   const live = new Set(ts.map((t) => t.id));
@@ -153,6 +228,25 @@ function draw() {
   ctx.strokeStyle = 'rgba(0,229,255,0.07)';
   for (let r = 1.5; r <= RANGE; r += 1.5) {
     ctx.beginPath(); ctx.arc(ox, oy, r * s, 0, 2 * Math.PI); ctx.stroke();
+  }
+
+  // trigger zones (filled cyan, brighter when occupied)
+  for (const z of zones) {
+    if (!z.visible) continue;
+    ctx.beginPath();
+    z.pts.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+    ctx.closePath();
+    ctx.fillStyle = z.occupied ? 'rgba(0,229,255,0.16)' : 'rgba(0,229,255,0.05)';
+    ctx.fill();
+    ctx.lineWidth = z.occupied ? 1.8 : 1.2;
+    ctx.strokeStyle = z.occupied ? 'rgba(0,229,255,0.9)' : 'rgba(0,229,255,0.4)';
+    ctx.stroke();
+    const c = z.pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]).map((v) => v / z.pts.length);
+    const [cx, cy] = wts(c[0], c[1]);
+    ctx.fillStyle = z.occupied ? '#bff3fb' : 'rgba(0,229,255,0.55)';
+    ctx.font = "600 11px 'IBM Plex Mono', monospace";
+    ctx.textAlign = 'center';
+    ctx.fillText(z.name.toUpperCase(), cx, cy);
   }
 
   // captured background baseline (orange dashed ghost outline)
@@ -255,6 +349,18 @@ function draw() {
     ctx.fillRect(bx + 0.36 * s, by - 0.5 * s - 7, 2.5, 15);
     ctx.fillStyle = '#d6dde4';
     ctx.fillText(label, bx + 0.36 * s + 7, by - 0.5 * s + 2.5);
+  }
+
+  // zone being drawn (dashed)
+  if (draft.length) {
+    ctx.strokeStyle = 'rgba(0,229,255,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    draft.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const p of draft) { const [sx, sy] = wts(p[0], p[1]); ctx.fillStyle = '#00e5ff'; ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, 2 * Math.PI); ctx.fill(); }
   }
 
   // sensor marker
@@ -542,7 +648,17 @@ function wireControls() {
   }, { passive: false });
 
   let dragging = false, lastX = 0, lastY = 0;
-  wrap.addEventListener('mousedown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const r = wrap.getBoundingClientRect();
+    if (ui.tool === 'zone') {
+      const [wx, wy] = stw(e.clientX - r.left, e.clientY - r.top);
+      draft.push([wx, wy]);
+      $('draftCount').textContent = draft.length + ' pts';
+      return;
+    }
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+  });
   window.addEventListener('mouseup', () => (dragging = false));
   wrap.addEventListener('mousemove', (e) => {
     const r = wrap.getBoundingClientRect();
@@ -554,6 +670,20 @@ function wireControls() {
       lastX = e.clientX; lastY = e.clientY;
     }
   });
+
+  // tools + zone drawing
+  document.querySelectorAll('[data-tool]').forEach((b) => {
+    if (b.disabled) return;
+    b.onclick = () => setTool(b.getAttribute('data-tool'));
+  });
+  $('finishZone').onclick = finishZone;
+  $('cancelZone').onclick = cancelDraft;
+  $('drawNewZone').onclick = () => {
+    ui.tab = 'zones';
+    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.getAttribute('data-tab') === 'zones'));
+    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('active', p.getAttribute('data-pane') === 'zones'));
+    setTool('zone');
+  };
 
   // inert buttons (later steps) — give honest feedback
   ['projectBtn', 'recordBtn', 'protoPill'].forEach((id) => {

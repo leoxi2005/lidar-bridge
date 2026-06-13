@@ -63,6 +63,17 @@ function dbscan(pts, eps, minPts) {
   return groups;
 }
 
+// ray-casting point-in-polygon (poly = [[x,y],...])
+function pointInPoly(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 function angleToBin(angleDeg) {
   let idx = Math.round((angleDeg * NBINS) / 360) % NBINS; // guard (a): never == NBINS
   if (idx < 0) idx += NBINS;
@@ -89,6 +100,17 @@ class Pipeline {
     // tracking state
     this.tracks = [];
     this._nextId = 1;
+
+    // trigger zones: [{ name, slug, pts:[[x,y],...] }]
+    this.zones = [];
+  }
+
+  setZones(zones) {
+    this.zones = (zones || []).map((z) => ({
+      name: z.name,
+      slug: z.slug,
+      pts: z.pts,
+    }));
   }
 
   setConfig(patch) {
@@ -183,12 +205,25 @@ class Pipeline {
     const blobs = this._clusterBlobs(fgPts);
     this._updateTracks(blobs, dtSec);
 
+    // ZONES: point-in-polygon occupancy per zone, and tag each track with its zone.
+    const zoneOcc = this.zones.map(() => false);
+    for (const t of this.tracks) t.zone = '';
+    this.zones.forEach((z, zi) => {
+      for (const t of this.tracks) {
+        if (pointInPoly(t.x, t.y, z.pts)) {
+          zoneOcc[zi] = true;
+          if (!t.zone) t.zone = z.name;
+        }
+      }
+    });
+
     const frame = {
       pts,
       count,
       nbins: NBINS,
       bgCaptured: this.bgCaptured,
       capturing,
+      zoneOcc,
       tracks: this.tracks.map((t) => ({
         id: t.id,
         x: t.x,

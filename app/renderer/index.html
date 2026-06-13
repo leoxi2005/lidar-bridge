@@ -236,7 +236,7 @@ select.input{ padding:0 6px; }
         <button class="toolbtn active" data-tool="select" title="Select / Pan">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2l9 5-4 1.2L6.5 13 3 2z" fill="currentColor"/></svg>
         </button>
-        <button class="toolbtn" disabled title="Draw Zone (step 5)">
+        <button class="toolbtn" data-tool="zone" title="Draw Zone">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3h10v10H3z" stroke="currentColor" stroke-width="1.3"/></svg>
         </button>
         <button class="toolbtn" disabled title="Warp / Corner-pin (step 7)">
@@ -245,6 +245,12 @@ select.input{ padding:0 6px; }
         <button class="toolbtn" disabled title="Measure">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M5 6v4M9 6v4" stroke="currentColor" stroke-width="1.3"/></svg>
         </button>
+      </div>
+
+      <div id="draftBanner" style="display:none;position:absolute;top:14px;left:50%;transform:translateX(-50%);align-items:center;gap:14px;background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.4);border-radius:8px;padding:8px 14px;backdrop-filter:blur(6px)">
+        <span class="mono" style="font-size:11px;color:#cfeef5">DRAW ZONE · click map to add points · <span id="draftCount" style="color:#9aa3ad">0 pts</span></span>
+        <button id="finishZone" class="mono" style="padding:5px 11px;border-radius:5px;border:1px solid rgba(0,229,255,0.5);background:rgba(0,229,255,0.18);color:#dffaff;cursor:pointer;font-size:10.5px">FINISH</button>
+        <button id="cancelZone" class="mono" style="padding:5px 11px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:#9aa3ad;cursor:pointer;font-size:10.5px">CANCEL</button>
       </div>
 
       <div class="float mono" style="top:12px;right:12px;display:flex;flex-direction:column;gap:7px;padding:10px 12px;font-size:10px">
@@ -290,7 +296,11 @@ select.input{ padding:0 6px; }
       </div>
 
       <div class="tab-pane" data-pane="zones">
-        <div class="note">Trigger zones (draw polygons, point-in-polygon occupancy) arrive in <b>build step 5</b>.</div>
+        <div id="zoneList" style="flex:1;overflow-y:auto;padding:10px 10px 6px;display:flex;flex-direction:column;gap:7px"></div>
+        <div id="zoneEmpty" class="note">No zones yet. Use the <b>Draw Zone</b> tool (or the button below): click on the map to drop polygon vertices, then FINISH.</div>
+        <div style="flex:0 0 auto;padding:11px 12px;border-top:1px solid var(--hair)">
+          <button id="drawNewZone" style="width:100%;padding:10px;border-radius:7px;border:1px solid rgba(0,229,255,0.3);background:rgba(0,229,255,0.07);color:#a9e8f1;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.06em">+ DRAW NEW ZONE</button>
+        </div>
       </div>
       <div class="tab-pane" data-pane="warp">
         <div class="note">Coordinate warp / corner-pin homography and the output monitor arrive in <b>build step 7–8</b>.</div>
