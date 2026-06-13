@@ -1,18 +1,50 @@
 {
   "name": "lidar-bridge",
   "version": "0.1.0",
-  "description": "LiDAR Bridge — 2D LiDAR tracking → TouchDesigner (Step 1: serial acquisition + point cloud)",
+  "description": "LiDAR Bridge — 2D LiDAR tracking → TouchDesigner",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis portable",
     "list-ports": "node -e \"require('@serialport/bindings-cpp').autoDetect().list().then(p=>console.log(p))\""
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "serialport": "^12.0.0"
+  },
+  "build": {
+    "appId": "com.lidarbridge.app",
+    "productName": "LiDAR Bridge",
+    "files": [
+      "main/**",
+      "renderer/**",
+      "preload.js",
+      "projector-preload.js",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/serialport/**",
+      "**/node_modules/@serialport/**",
+      "**/*.node"
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.utilities"
+    }
   }
 }

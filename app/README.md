@@ -62,6 +62,40 @@ baudrate, **CONNECT**.
 `LIDAR_AUTOSHOT=/tmp/shot.png npm start` connects SIM, renders, saves a PNG, and quits.
 Optional `LIDAR_SHOT_JS` (renderer JS to run first), `LIDAR_SHOT_WAIT` (ms), `LIDAR_SHOT_PROJ=1` (capture the projector window).
 
+## Run / package on Windows
+> Native bits (`serialport`, the Electron binary) are platform-specific — **do not copy
+> `node_modules` from the Mac**. Always `npm install` on the target OS. Building a Windows
+> `.exe` is reliable only **on a Windows machine** (cross-building from macOS needs Wine).
+
+**Quick test from source (recommended first):**
+1. Install **Node.js LTS** (nodejs.org), tick "Add to PATH".
+2. Install the USB-serial driver for the RPLIDAR: Slamtec uses a **CP210x** chip → install
+   Silicon Labs "CP210x USB to UART Bridge VCP Driver" (some units use CH340 → its driver).
+3. Copy the `app/` folder to Windows **without `node_modules/`**.
+4. In PowerShell/CMD inside the folder:
+   ```
+   npm install
+   npm start
+   ```
+5. Plug in the RPLIDAR; check its port in Device Manager (e.g. `COM3`). In the app set
+   **COM PORT = COM3**, matching baudrate (A1/A2 115200; A3/S 256000 or 1000000), **CONNECT**.
+   (Or keep `SIM` to test with no sensor.)
+
+**Build a double-click installer (`.exe`) — run this on Windows:**
+```
+npm install
+npm run dist:win
+```
+Outputs land in `dist/`:
+- `LiDAR Bridge-<ver>-x64.exe` (NSIS installer)
+- a **portable** `.exe` that runs without installing.
+Copy either to other Windows machines — no Node/Electron needed there.
+
+**Windows gotchas:**
+- First OSC send to the network may trigger a **Windows Firewall** prompt → Allow (UDP).
+- SmartScreen may warn "Unknown publisher" (app isn't code-signed) → More info → Run anyway.
+- For OSC to TouchDesigner on the **same** PC use host `127.0.0.1`; on another machine use that machine's LAN IP.
+
 ## Notes
 - `serialport` ships ABI-stable N-API prebuilds (loads under Electron without rebuild) and is lazy-loaded so SIM mode works even if the binding is missing.
 - The app requests **no microphone / camera** permission — it uses none.
