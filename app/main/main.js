@@ -37,10 +37,12 @@ function send(channel, payload) {
 
 // Full pipeline pass for one scan, then stream the frame to the renderer.
 function onScan(nodes) {
-  const frame = pipeline.process(nodes);
   const now = Date.now();
-  frame.periodMs = lastScanAt ? now - lastScanAt : 0;
+  const periodMs = lastScanAt ? now - lastScanAt : 100;
   lastScanAt = now;
+  const dtSec = Math.min(0.5, periodMs / 1000);
+  const frame = pipeline.process(nodes, dtSec);
+  frame.periodMs = periodMs;
   send('lidar:scan', frame);
 }
 

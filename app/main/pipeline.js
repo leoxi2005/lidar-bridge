@@ -15,6 +15,54 @@ const NBINS = 720; // 0.5° resolution
 
 const DEG = Math.PI / 180;
 
+// tracking parameters (README: ε≈0.30 m, minPts≈3, max-jump ≈0.6 m)
+const CLUSTER_EPS = 0.3;
+const CLUSTER_MINPTS = 3;
+const MAX_BLOB_RADIUS = 0.9; // reject wall/furniture clusters larger than a person
+const MAX_BLOB_POINTS = 90;
+const MAX_JUMP = 0.6; // nearest-neighbor gate
+const MAX_MISSED = 8; // drop a track after this many unmatched frames
+const TRACK_PALETTE = ['#00e5ff', '#39ff7a', '#ffb000', '#ff5d8f'];
+
+// DBSCAN over an array of [x,y] points -> array of clusters (arrays of indices).
+function dbscan(pts, eps, minPts) {
+  const n = pts.length;
+  const eps2 = eps * eps;
+  const visited = new Uint8Array(n);
+  const cl = new Int32Array(n).fill(-1);
+  const region = (i) => {
+    const out = [];
+    for (let j = 0; j < n; j++) {
+      const dx = pts[i][0] - pts[j][0];
+      const dy = pts[i][1] - pts[j][1];
+      if (dx * dx + dy * dy <= eps2) out.push(j);
+    }
+    return out;
+  };
+  let cid = 0;
+  for (let i = 0; i < n; i++) {
+    if (visited[i]) continue;
+    visited[i] = 1;
+    const nb = region(i);
+    if (nb.length < minPts) continue;
+    cl[i] = cid;
+    const queue = nb.slice();
+    for (let q = 0; q < queue.length; q++) {
+      const j = queue[q];
+      if (!visited[j]) {
+        visited[j] = 1;
+        const nb2 = region(j);
+        if (nb2.length >= minPts) for (const k of nb2) queue.push(k);
+      }
+      if (cl[j] < 0) cl[j] = cid;
+    }
+    cid++;
+  }
+  const groups = Array.from({ length: cid }, () => []);
+  for (let i = 0; i < n; i++) if (cl[i] >= 0) groups[cl[i]].push(i);
+  return groups;
+}
+
 function angleToBin(angleDeg) {
   let idx = Math.round((angleDeg * NBINS) / 360) % NBINS; // guard (a): never == NBINS
   if (idx < 0) idx += NBINS;
@@ -37,6 +85,10 @@ class Pipeline {
     this.bg = new Float32Array(NBINS);
     this.bgCaptured = false;
     this._capFrames = 0; // >0 while capturing (counts down)
+
+    // tracking state
+    this.tracks = [];
+    this._nextId = 1;
   }
 
   setConfig(patch) {
@@ -70,9 +122,9 @@ class Pipeline {
     this.cfg.bgSubtract = false;
   }
 
-  // nodes: [{ angle (deg), distMm, quality }]
-  // returns a frame: { pts: Float32Array[x,y,fg per bin], count, nbins }
-  process(nodes) {
+  // nodes: [{ angle (deg), distMm, quality }]; dtSec = seconds since previous scan
+  // returns a frame: { pts, count, nbins, tracks, ... }
+  process(nodes, dtSec = 0.1) {
     const dist = this._dist;
     dist.fill(0);
 
@@ -87,6 +139,7 @@ class Pipeline {
     const capturing = this._capFrames > 0;
     const subtract = this.cfg.bgSubtract && this.bgCaptured;
     const tol = this.cfg.bgTol;
+    const fgPts = []; // foreground world points fed to clustering
 
     let count = 0;
     for (const node of nodes) {
@@ -118,6 +171,7 @@ class Pipeline {
       pts[idx * 3] = wx;
       pts[idx * 3 + 1] = wy;
       pts[idx * 3 + 2] = fg;
+      if (fg === 1) fgPts.push([wx, wy]);
     }
 
     if (capturing) {
@@ -125,7 +179,27 @@ class Pipeline {
       if (this._capFrames === 0) this.bgCaptured = true;
     }
 
-    const frame = { pts, count, nbins: NBINS, bgCaptured: this.bgCaptured, capturing };
+    // CLUSTER + TRACK
+    const blobs = this._clusterBlobs(fgPts);
+    this._updateTracks(blobs, dtSec);
+
+    const frame = {
+      pts,
+      count,
+      nbins: NBINS,
+      bgCaptured: this.bgCaptured,
+      capturing,
+      tracks: this.tracks.map((t) => ({
+        id: t.id,
+        x: t.x,
+        y: t.y,
+        vx: t.vx,
+        vy: t.vy,
+        vel: Math.hypot(t.vx, t.vy),
+        color: t.color,
+        zone: t.zone || '',
+      })),
+    };
 
     // baseline contour (world metres) for the orange dashed ghost outline
     if (this.bgCaptured) {
@@ -142,6 +216,62 @@ class Pipeline {
     }
 
     return frame;
+  }
+
+  // DBSCAN clusters -> person-sized blobs (centroid + radius), walls rejected by size.
+  _clusterBlobs(fgPts) {
+    if (fgPts.length < CLUSTER_MINPTS) return [];
+    const groups = dbscan(fgPts, CLUSTER_EPS, CLUSTER_MINPTS);
+    const blobs = [];
+    for (const g of groups) {
+      if (g.length > MAX_BLOB_POINTS) continue;
+      let cx = 0, cy = 0;
+      for (const i of g) { cx += fgPts[i][0]; cy += fgPts[i][1]; }
+      cx /= g.length; cy /= g.length;
+      let r = 0;
+      for (const i of g) {
+        const d = Math.hypot(fgPts[i][0] - cx, fgPts[i][1] - cy);
+        if (d > r) r = d;
+      }
+      if (r > MAX_BLOB_RADIUS) continue; // too big to be a person -> wall/furniture
+      blobs.push({ x: cx, y: cy, r });
+    }
+    return blobs;
+  }
+
+  // Nearest-neighbor assignment with a max-jump gate; age out missing tracks.
+  _updateTracks(blobs, dt) {
+    const used = new Set();
+    for (const t of this.tracks) {
+      let best = -1;
+      let bestD = MAX_JUMP;
+      blobs.forEach((b, i) => {
+        if (used.has(i)) return;
+        const d = Math.hypot(b.x - t.x, b.y - t.y);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      if (best >= 0) {
+        const b = blobs[best];
+        used.add(best);
+        if (dt > 0) {
+          // EMA-smoothed velocity (m/s)
+          t.vx = 0.6 * t.vx + 0.4 * ((b.x - t.x) / dt);
+          t.vy = 0.6 * t.vy + 0.4 * ((b.y - t.y) / dt);
+        }
+        t.x = b.x; t.y = b.y; t.r = b.r; t.missed = 0;
+      } else {
+        t.missed++;
+      }
+    }
+    blobs.forEach((b, i) => {
+      if (used.has(i)) return;
+      const id = String(this._nextId++).padStart(2, '0');
+      this.tracks.push({
+        id, x: b.x, y: b.y, r: b.r, vx: 0, vy: 0, missed: 0,
+        color: TRACK_PALETTE[(this.tracks.length) % TRACK_PALETTE.length],
+      });
+    });
+    this.tracks = this.tracks.filter((t) => t.missed < MAX_MISSED);
   }
 }
 

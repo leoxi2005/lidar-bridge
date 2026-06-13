@@ -282,7 +282,7 @@ select.input{ padding:0 6px; }
           <span style="width:74px;text-align:right;font-size:9px;color:#5b636d">ZONE</span>
         </div>
         <div id="trackList" style="flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:4px"></div>
-        <div class="note">No tracked objects yet. Clustering &amp; ID tracking arrive in <b>build step 4</b>. This step streams the raw point cloud from the sensor.</div>
+        <div id="trackEmpty" class="note">No objects in view. Moving people/objects cluster into tracked IDs here. Tip: capture background &amp; enable subtract for the cleanest tracking.</div>
         <div style="flex:0 0 auto;padding:10px 14px;border-top:1px solid var(--hair);display:flex;justify-content:space-between" class="mono">
           <span style="font-size:10px;color:#5b636d">TRACKED <span style="color:#39ff7a" id="trackedCount">0</span></span>
           <span style="font-size:10px;color:#5b636d">CLUSTER ε 0.30m</span>

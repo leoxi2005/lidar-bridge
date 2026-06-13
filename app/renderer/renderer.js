@@ -65,6 +65,8 @@ const stw = (sx, sy) => {
 // just plots; persistent slots keep the prototype's sweep-fade look across scans.
 const bins = new Array(NBINS).fill(null);
 const bg = { captured: false, subtract: false, tol: 0.18, contour: null, show: true, hide: true };
+let tracks = [];
+const trails = new Map(); // id -> [[x,y], ...] motion trail
 
 function ingestScan(frame) {
   if (!ui.streaming) return;
@@ -80,6 +82,41 @@ function ingestScan(frame) {
   liveStats.latency = frame.periodMs;
   bg.contour = frame.bg || null;
   syncBgUi(frame.bgCaptured, frame.capturing);
+
+  tracks = frame.tracks || [];
+  updateTrails(tracks);
+  renderTrackTable(tracks);
+}
+
+function updateTrails(ts) {
+  const live = new Set(ts.map((t) => t.id));
+  for (const id of trails.keys()) if (!live.has(id)) trails.delete(id);
+  for (const t of ts) {
+    let tr = trails.get(t.id);
+    if (!tr) { tr = []; trails.set(t.id, tr); }
+    const last = tr[tr.length - 1];
+    if (!last || Math.hypot(last[0] - t.x, last[1] - t.y) > 0.03) tr.push([t.x, t.y]);
+    if (tr.length > 16) tr.shift();
+  }
+}
+
+function renderTrackTable(ts) {
+  const list = $('trackList');
+  list.innerHTML = '';
+  for (const t of ts) {
+    const row = document.createElement('div');
+    row.style.cssText =
+      "display:flex;align-items:center;padding:8px 6px;border-radius:6px;background:#10141a;border:1px solid rgba(255,255,255,0.05);font-family:'IBM Plex Mono',monospace;font-size:11px";
+    const zoneColor = t.zone ? '#00e5ff' : '#5b636d';
+    row.innerHTML =
+      `<span style="width:44px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${t.color};box-shadow:0 0 6px ${t.color}"></span><span style="color:#cdd4dc">${t.id}</span></span>
+       <span style="flex:1;color:#9aa3ad">${t.x.toFixed(2)} <span style="color:#4d555e">/</span> ${t.y.toFixed(2)}</span>
+       <span style="width:46px;text-align:right;color:#9aa3ad">${t.vel.toFixed(2)}</span>
+       <span style="width:74px;text-align:right;color:${zoneColor}">${t.zone || '—'}</span>`;
+    list.appendChild(row);
+  }
+  $('trackedCount').textContent = ts.length;
+  $('trackEmpty').style.display = ts.length ? 'none' : 'block';
 }
 
 // ---- stats ----------------------------------------------------------------
@@ -173,6 +210,52 @@ function draw() {
   ctx.strokeStyle = grad;
   ctx.lineWidth = 1.6;
   ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+
+  // tracked blobs (ring + crosshair + velocity arrow + trail + label)
+  for (const t of tracks) {
+    const col = t.color || '#00e5ff';
+    const tr = trails.get(t.id);
+    if (tr && tr.length > 1) {
+      ctx.strokeStyle = col + '33';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      tr.forEach((h, i) => { const [hx, hy] = wts(h[0], h[1]); i ? ctx.lineTo(hx, hy) : ctx.moveTo(hx, hy); });
+      ctx.stroke();
+    }
+    const [bx, by] = wts(t.x, t.y);
+    ctx.beginPath();
+    ctx.arc(bx, by, 0.32 * s, 0, 2 * Math.PI);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.fillStyle = col + '22';
+    ctx.fill();
+    ctx.strokeStyle = col + '99';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(bx - 0.32 * s, by); ctx.lineTo(bx + 0.32 * s, by);
+    ctx.moveTo(bx, by - 0.32 * s); ctx.lineTo(bx, by + 0.32 * s);
+    ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(bx, by, 3, 0, 2 * Math.PI); ctx.fill();
+    const v = Math.hypot(t.vx, t.vy);
+    if (v > 0.05) {
+      const ux = t.vx / v, uy = t.vy / v;
+      const [ax, ay] = wts(t.x + ux * 0.7, t.y + uy * 0.7);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ax, ay); ctx.stroke();
+    }
+    const label = t.id + '  ' + t.x.toFixed(2) + ',' + t.y.toFixed(2);
+    ctx.font = "500 10px 'IBM Plex Mono', monospace";
+    ctx.textAlign = 'left';
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(10,12,16,0.82)';
+    ctx.fillRect(bx + 0.36 * s, by - 0.5 * s - 7, tw + 10, 15);
+    ctx.fillStyle = col;
+    ctx.fillRect(bx + 0.36 * s, by - 0.5 * s - 7, 2.5, 15);
+    ctx.fillStyle = '#d6dde4';
+    ctx.fillText(label, bx + 0.36 * s + 7, by - 0.5 * s + 2.5);
+  }
 
   // sensor marker
   ctx.save();
