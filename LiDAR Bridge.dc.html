@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;background:#0a0b0e}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.18)}
+input,select{font-family:inherit;outline:none}
+input:focus,select:focus{border-color:rgba(0,229,255,0.5)!important}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+@keyframes recpulse{0%{box-shadow:0 0 0 0 rgba(255,77,94,0.45)}70%{box-shadow:0 0 0 7px rgba(255,77,94,0)}100%{box-shadow:0 0 0 0 rgba(255,77,94,0)}}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;flex-direction:column;background:#0a0b0e;color:#e8ecf1;font-family:'IBM Plex Sans',sans-serif;font-size:13px;overflow:hidden">
+
+  <div style="display:flex;align-items:center;gap:14px;height:50px;padding:0 14px;background:#0e1115;border-bottom:1px solid rgba(255,255,255,0.07);flex:0 0 auto;position:relative;z-index:5">
+    <div style="display:flex;align-items:center;gap:9px">
+      <svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="#00e5ff" stroke-width="1" opacity="0.35"/><circle cx="12" cy="12" r="6" fill="none" stroke="#00e5ff" stroke-width="1" opacity="0.55"/><circle cx="12" cy="12" r="2" fill="#00e5ff"/><line x1="12" y1="12" x2="21" y2="6.5" stroke="#00e5ff" stroke-width="1.3"/></svg>
+      <div style="line-height:1.05">
+        <div style="font-weight:700;letter-spacing:0.04em;font-size:13.5px">LiDAR<span style="color:#00e5ff">Bridge</span></div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.18em;color:#5b636d;text-transform:uppercase">Tracking → TouchDesigner</div>
+      </div>
+    </div>
+
+    <div style="width:1px;height:24px;background:rgba(255,255,255,0.08)"></div>
+
+    <button onClick="{{ toggleStream }}" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:6px;border:1px solid rgba(0,229,255,0.25);background:rgba(0,229,255,0.08);color:#cfeef5;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em">
+      <sc-if value="{{ streaming }}" hint-placeholder-val="{{ true }}"><span style="display:flex;gap:2.5px"><span style="width:3px;height:11px;background:#00e5ff;display:block"></span><span style="width:3px;height:11px;background:#00e5ff;display:block"></span></span></sc-if>
+      <sc-if value="{{ paused }}" hint-placeholder-val="{{ false }}"><span style="width:0;height:0;border-left:9px solid #00e5ff;border-top:6px solid transparent;border-bottom:6px solid transparent;display:block"></span></sc-if>
+      <span>{{ streamLabel }}</span>
+    </button>
+
+    <div style="display:flex;align-items:center;gap:18px;font-family:'IBM Plex Mono',monospace;font-size:11px">
+      <div style="display:flex;flex-direction:column;line-height:1.15"><span style="color:#5b636d;font-size:8.5px;letter-spacing:0.12em">RENDER</span><span style="color:#e8ecf1">{{ fps }} <span style="color:#5b636d">fps</span></span></div>
+      <div style="display:flex;flex-direction:column;line-height:1.15"><span style="color:#5b636d;font-size:8.5px;letter-spacing:0.12em">POINTS</span><span style="color:#e8ecf1">{{ pointCount }}</span></div>
+      <div style="display:flex;flex-direction:column;line-height:1.15"><span style="color:#5b636d;font-size:8.5px;letter-spacing:0.12em">LATENCY</span><span style="color:#e8ecf1">{{ latency }} <span style="color:#5b636d">ms</span></span></div>
+    </div>
+
+    <div style="flex:1"></div>
+
+    <button onClick="{{ goOutput }}" style="display:flex;align-items:center;gap:9px;height:30px;padding:0 11px;border-radius:6px;border:1px solid rgba(255,255,255,0.09);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px">
+      <span style="width:7px;height:7px;border-radius:50%;background:#39ff7a;box-shadow:0 0 7px #39ff7a;animation:blink 1.4s infinite"></span>
+      <span style="color:#cdd4dc">{{ outProtoUpper }}</span>
+      <span style="color:#5b636d">→ {{ host }}:{{ port }}</span>
+    </button>
+
+    <button onClick="{{ openOutput }}" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:6px;border:1px solid rgba(0,229,255,0.25);background:rgba(0,229,255,0.06);color:#a9e8f1;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 13.5h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="6.7" r="1.6" fill="currentColor"/></svg>
+      <span>PROJECT</span>
+    </button>
+
+    <button onClick="{{ toggleRecord }}" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:6px;border:1px solid rgba(255,77,94,0.3);background:rgba(255,77,94,0.07);color:#ffc2c9;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em">
+      <span style="width:9px;height:9px;border-radius:50%;background:#ff4d5e"></span>
+      <span>{{ recBtnLabel }}</span>
+    </button>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+
+    <div style="width:248px;flex:0 0 auto;background:#0c0f13;border-right:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px 9px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.16em;color:#5b636d">DEVICES</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#39ff7a">{{ onlineCount }} ONLINE</span>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px;padding:0 10px">
+        <sc-for list="{{ sensorRows }}" as="s" hint-placeholder-count="3">
+          <div onClick="{{ s.onSelect }}" style="position:relative;display:flex;flex-direction:column;gap:5px;padding:9px 10px 9px 12px;border-radius:7px;border:1px solid {{ s.border }};background:{{ s.bg }};cursor:pointer;overflow:hidden">
+            <sc-if value="{{ s.sel }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;left:0;top:0;bottom:0;width:2.5px;background:#00e5ff"></span></sc-if>
+            <div style="display:flex;align-items:center;gap:7px">
+              <span style="width:7px;height:7px;border-radius:50%;background:{{ s.dot }};box-shadow:0 0 6px {{ s.dot }};flex:0 0 auto"></span>
+              <span style="font-weight:600;font-size:12px;color:{{ s.nameColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.name }}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#5b636d">
+              <span>{{ s.conn }}</span><span>{{ s.addr }}</span>
+            </div>
+            <div style="display:flex;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#717a84">
+              <span>RANGE {{ s.range }}</span><span>{{ s.hz }} Hz</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <button style="margin:8px 10px 14px;padding:8px;border-radius:7px;border:1px dashed rgba(255,255,255,0.14);background:transparent;color:#717a84;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em">+ ADD DEVICE</button>
+
+      <div style="height:1px;background:rgba(255,255,255,0.06);margin:0 0 4px"></div>
+
+      <div style="padding:11px 14px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.16em;color:#5b636d">CONNECTION · {{ selName }}</div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:6px">
+          <button onClick="{{ setSerial }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ connSerialSeg.bd }};background:{{ connSerialSeg.bg }};color:{{ connSerialSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em">SERIAL</button>
+          <button onClick="{{ setNetwork }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ connNetSeg.bd }};background:{{ connNetSeg.bg }};color:{{ connNetSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em">NETWORK</button>
+        </div>
+        <sc-if value="{{ isSerial }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;gap:8px">
+            <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">COM PORT</span><input value="{{ comPort }}" onChange="{{ onPort }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+            <label style="flex:1.2;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">BAUDRATE</span><select value="{{ baudrate }}" onChange="{{ onBaud }}" style="width:100%;height:28px;padding:0 6px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"><option value="115200">115200</option><option value="256000">256000</option><option value="1000000">1000000</option></select></label>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isNetwork }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:8px">
+            <label style="flex:1.6;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">IP ADDRESS</span><input value="{{ ipAddr }}" onChange="{{ onIp }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+            <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">PORT</span><input value="{{ ipPort }}" onChange="{{ onIpPort }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button onClick="{{ setTcp }}" style="flex:1;height:26px;border-radius:5px;border:1px solid {{ tcpSeg.bd }};background:{{ tcpSeg.bg }};color:{{ tcpSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">TCP</button>
+            <button onClick="{{ setUdp }}" style="flex:1;height:26px;border-radius:5px;border:1px solid {{ udpSeg.bd }};background:{{ udpSeg.bg }};color:{{ udpSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">UDP</button>
+          </div>
+        </sc-if>
+        <label style="display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">SCAN MODE</span>
+          <div style="display:flex;gap:6px">
+            <button onClick="{{ setScanStd }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ scanStdSeg.bd }};background:{{ scanStdSeg.bg }};color:{{ scanStdSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">STANDARD</button>
+            <button onClick="{{ setScanExp }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ scanExpSeg.bd }};background:{{ scanExpSeg.bg }};color:{{ scanExpSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">EXPRESS</button>
+          </div>
+        </label>
+      </div>
+
+      <div style="padding:14px 14px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.16em;color:#5b636d">ACQUISITION</div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">PRECISION</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5b636d">{{ samplesLabel }}</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button onClick="{{ setP1 }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ p1Seg.bd }};background:{{ p1Seg.bg }};color:{{ p1Seg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px">1</button>
+          <button onClick="{{ setP2 }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ p2Seg.bd }};background:{{ p2Seg.bg }};color:{{ p2Seg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px">2</button>
+          <button onClick="{{ setP3 }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ p3Seg.bd }};background:{{ p3Seg.bg }};color:{{ p3Seg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px">3</button>
+          <button onClick="{{ setP4 }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ p4Seg.bd }};background:{{ p4Seg.bg }};color:{{ p4Seg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px">4</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">DIST MIN (m)</span><input value="{{ distMin }}" onChange="{{ onDistMin }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+          <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">DIST MAX (m)</span><input value="{{ distMax }}" onChange="{{ onDistMax }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <label style="flex:1.6;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">COORDINATE</span>
+            <div style="display:flex;gap:6px">
+              <button onClick="{{ setCoordPolar }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ coordPolarSeg.bd }};background:{{ coordPolarSeg.bg }};color:{{ coordPolarSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px">POLAR</button>
+              <button onClick="{{ setCoordCart }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ coordCartSeg.bd }};background:{{ coordCartSeg.bg }};color:{{ coordCartSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px">CARTESIAN</button>
+            </div>
+          </label>
+          <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">QUALITY</span>
+            <button onClick="{{ toggleQuality }}" style="height:28px;border-radius:5px;border:1px solid {{ qualitySeg.bd }};background:{{ qualitySeg.bg }};color:{{ qualitySeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em">FILTER {{ qualityLabel }}</button>
+          </label>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 14px 8px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.16em;color:#5b636d">BACKGROUND MASK</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:{{ bgStatusColor }}">{{ bgStatusLabel }}</span>
+      </div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <button onClick="{{ captureBg }}" style="padding:9px;border-radius:6px;border:1px solid rgba(0,229,255,0.3);background:rgba(0,229,255,0.08);color:#a9e8f1;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.05em">{{ bgCapLabel }}</button>
+        <sc-if value="{{ bgHasCapture }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:7px;background:#10141a;border:1px solid rgba(255,255,255,0.07)">
+              <div style="display:flex;flex-direction:column;gap:2px"><span style="font-weight:600;font-size:11.5px;color:#dbe1e8">Subtract background</span><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5b636d">hide walls · keep moving objects</span></div>
+              <button onClick="{{ toggleBgSub }}" style="width:46px;height:26px;border-radius:20px;border:1px solid {{ bgSwBd }};background:{{ bgSwBg }};cursor:pointer;position:relative;padding:0;flex:0 0 auto"><span style="position:absolute;top:2px;left:{{ bgKnobLeft }};width:20px;height:20px;border-radius:50%;background:{{ bgKnobBg }};transition:left .15s ease"></span></button>
+            </div>
+            <label style="display:flex;flex-direction:column;gap:5px">
+              <div style="display:flex;justify-content:space-between"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">TOLERANCE</span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#9fe4ef">{{ bgTolLabel }}</span></div>
+              <input type="range" min="0.05" max="0.6" step="0.01" value="{{ bgTol }}" onChange="{{ onBgTol }}" style="width:100%;accent-color:#39ff7a">
+            </label>
+            <button onClick="{{ clearBg }}" style="padding:7px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em">CLEAR BACKGROUND</button>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="padding:14px 14px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.16em;color:#5b636d">PLACEMENT · room map</div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:8px">
+          <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">POS X (m)</span><input value="{{ calX }}" onChange="{{ onCalX }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+          <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">POS Y (m)</span><input value="{{ calY }}" onChange="{{ onCalY }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+          <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">ROT (°)</span><input value="{{ calRot }}" onChange="{{ onCalRot }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+        </div>
+        <button style="padding:8px;border-radius:6px;border:1px solid rgba(0,229,255,0.25);background:rgba(0,229,255,0.06);color:#9fe4ef;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.06em">AUTO-LEVEL FLOOR PLANE</button>
+      </div>
+      <div style="height:14px;flex:0 0 auto"></div>
+    </div>
+
+    <div ref="{{ wrapRef }}" style="flex:1;position:relative;min-width:0;background:radial-gradient(120% 120% at 50% 38%, #0d1116 0%, #090a0d 70%);overflow:hidden">
+      <canvas ref="{{ canvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+
+      <div style="position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:5px;background:rgba(14,17,21,0.82);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.08);border-radius:9px;padding:5px">
+        <sc-for list="{{ toolRows }}" as="t" hint-placeholder-count="4">
+          <button onClick="{{ t.onClick }}" title="{{ t.label }}" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.color }};cursor:pointer;padding:0">
+            <span style="display:flex">{{ t.icon }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{ drafting }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.4);border-radius:8px;padding:8px 14px;backdrop-filter:blur(6px)">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#cfeef5">DRAW ZONE · click map to add points · <span style="color:#9aa3ad">{{ draftCount }} pts</span></span>
+          <button onClick="{{ finishZone }}" style="padding:5px 11px;border-radius:5px;border:1px solid rgba(0,229,255,0.5);background:rgba(0,229,255,0.18);color:#dffaff;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px">FINISH</button>
+          <button onClick="{{ cancelDraft }}" style="padding:5px 11px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px">CANCEL</button>
+        </div>
+      </sc-if>
+
+      <div style="position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:7px;background:rgba(14,17,21,0.82);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.08);border-radius:9px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:10px">
+        <div style="font-size:9px;letter-spacing:0.14em;color:#5b636d">SCENE</div>
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:2px;background:#00e5ff"></span><span style="color:#9aa3ad">raw point cloud</span></div>
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #39ff7a"></span><span style="color:#9aa3ad">tracked blob</span></div>
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:2px;background:rgba(0,229,255,0.28);border:1px solid rgba(0,229,255,0.6)"></span><span style="color:#9aa3ad">trigger zone</span></div>
+      </div>
+
+      <div style="position:absolute;bottom:12px;left:12px;display:flex;gap:9px;align-items:center;background:rgba(14,17,21,0.82);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:7px 11px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3ad">
+        <span style="color:#5b636d">CURSOR</span><span ref="{{ coordRef }}" style="color:#cdd4dc;min-width:96px;display:inline-block">x 0.00  y 0.00</span>
+      </div>
+
+      <div style="position:absolute;bottom:12px;right:12px;display:flex;gap:6px;align-items:center">
+        <button onClick="{{ zoomOut }}" style="width:30px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.09);background:rgba(14,17,21,0.85);color:#cdd4dc;cursor:pointer;font-size:16px;line-height:1">−</button>
+        <button onClick="{{ resetView }}" style="height:30px;padding:0 11px;border-radius:6px;border:1px solid rgba(255,255,255,0.09);background:rgba(14,17,21,0.85);color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">FIT</button>
+        <button onClick="{{ zoomIn }}" style="width:30px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.09);background:rgba(14,17,21,0.85);color:#cdd4dc;cursor:pointer;font-size:16px;line-height:1">+</button>
+      </div>
+    </div>
+
+    <div style="width:312px;flex:0 0 auto;background:#0c0f13;border-left:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;padding:4px;gap:3px;border-bottom:1px solid rgba(255,255,255,0.07);flex:0 0 auto">
+        <sc-for list="{{ tabRows }}" as="tb" hint-placeholder-count="3">
+          <button onClick="{{ tb.onClick }}" style="flex:1;position:relative;height:34px;border:none;background:{{ tb.bg }};color:{{ tb.color }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.1em;border-radius:6px">{{ tb.label }}<sc-if value="{{ tb.active }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;left:14px;right:14px;bottom:2px;height:2px;background:#00e5ff;border-radius:2px"></span></sc-if></button>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{ isTrack }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <div style="display:flex;padding:9px 14px 7px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#5b636d">
+            <span style="width:44px">ID</span><span style="flex:1">X / Y (m)</span><span style="width:46px;text-align:right">VEL</span><span style="width:74px;text-align:right">ZONE</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:4px">
+            <sc-for list="{{ objects }}" as="o" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;padding:8px 6px;border-radius:6px;background:#10141a;border:1px solid rgba(255,255,255,0.05);font-family:'IBM Plex Mono',monospace;font-size:11px">
+                <span style="width:44px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:{{ o.color }};box-shadow:0 0 6px {{ o.color }}"></span><span style="color:#cdd4dc">{{ o.id }}</span></span>
+                <span style="flex:1;color:#9aa3ad">{{ o.x }} <span style="color:#4d555e">/</span> {{ o.y }}</span>
+                <span style="width:46px;text-align:right;color:#9aa3ad">{{ o.v }}</span>
+                <span style="width:74px;text-align:right;color:{{ o.zoneColor }}">{{ o.zone }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="flex:0 0 auto;padding:10px 14px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5b636d">
+            <span>TRACKED <span style="color:#39ff7a">{{ trackedCount }}</span></span>
+            <span>CLUSTER ε 0.30m</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isZones }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <div style="flex:1;overflow-y:auto;padding:10px 10px 6px;display:flex;flex-direction:column;gap:7px">
+            <sc-for list="{{ zoneRows }}" as="z" hint-placeholder-count="2">
+              <div style="padding:10px 11px;border-radius:8px;background:#10141a;border:1px solid {{ z.border }};display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <button onClick="{{ z.onToggle }}" title="visibility" style="width:22px;height:22px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:{{ z.eyeBg }};color:{{ z.eyeColor }};cursor:pointer;font-size:11px;padding:0;display:flex;align-items:center;justify-content:center;flex:0 0 auto">{{ z.eye }}</button>
+                  <span style="flex:1;font-weight:600;font-size:12.5px;color:#dbe1e8">{{ z.name }}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 8px;border-radius:20px;background:{{ z.badgeBg }};color:{{ z.badgeColor }}">{{ z.status }}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5b636d">
+                  <span>{{ z.count }} vertices</span>
+                  <span style="color:#717a84">/lidar/zone/{{ z.slug }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="flex:0 0 auto;padding:11px 12px;border-top:1px solid rgba(255,255,255,0.06)">
+            <button onClick="{{ drawTool }}" style="width:100%;padding:10px;border-radius:7px;border:1px solid rgba(0,229,255,0.3);background:rgba(0,229,255,0.07);color:#a9e8f1;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.06em">+ DRAW NEW ZONE</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isWarp }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 14px 4px;padding:11px 12px;border-radius:8px;background:#10141a;border:1px solid {{ warpRowBorder }}">
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-weight:600;font-size:12.5px;color:#dbe1e8">Apply to output</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#5b636d">send normalized 0–1 coords</span>
+            </div>
+            <button onClick="{{ toggleWarp }}" style="width:46px;height:26px;border-radius:20px;border:1px solid {{ warpSwBorder }};background:{{ warpSwBg }};cursor:pointer;position:relative;padding:0;flex:0 0 auto">
+              <span style="position:absolute;top:2px;left:{{ warpKnobLeft }};width:20px;height:20px;border-radius:50%;background:{{ warpKnobBg }};transition:left .15s ease"></span>
+            </button>
+          </div>
+
+          <div style="padding:11px 14px 4px;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#5b636d">TRANSFORM</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:{{ warpSelColor }}">{{ warpSelLabel }}</span>
+          </div>
+          <div style="padding:0 14px 6px;display:flex;gap:6px">
+            <button onClick="{{ selectAll }}" style="flex:1;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#cdd4dc;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.04em">SELECT ALL</button>
+            <button onClick="{{ clearSel }}" style="flex:1;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.04em">CLEAR</button>
+            <button onClick="{{ undo }}" title="undo (Ctrl+Z)" style="width:42px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:{{ undoColor }};cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;padding:0">&#8634;</button>
+            <button onClick="{{ redo }}" title="redo (Ctrl+Shift+Z)" style="width:42px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:{{ redoColor }};cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;padding:0">&#8635;</button>
+          </div>
+          <div style="padding:0 14px 6px;display:flex;gap:6px;align-items:center">
+            <span style="width:46px;flex:0 0 auto;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#9aa3ad;letter-spacing:0.06em">ROTATE</span>
+            <div style="flex:1;position:relative;display:flex;align-items:center">
+              <input value="{{ warpRotStep }}" onChange="{{ onRotStep }}" style="width:100%;height:30px;padding:0 20px 0 9px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+              <span style="position:absolute;right:9px;color:#5b636d;font-family:'IBM Plex Mono',monospace;font-size:12px;pointer-events:none">&deg;</span>
+            </div>
+            <button onClick="{{ rotateCCW }}" title="rotate counter-clockwise" style="width:36px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#cdd4dc;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;padding:0">&#8630;</button>
+            <button onClick="{{ rotateCW }}" title="rotate clockwise" style="width:36px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#cdd4dc;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;padding:0">&#8631;</button>
+          </div>
+          <div style="padding:0 14px 4px;display:flex;gap:6px">
+            <button onClick="{{ flipH }}" style="flex:1;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.04em">FLIP H</button>
+            <button onClick="{{ flipV }}" style="flex:1;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.04em">FLIP V</button>
+          </div>
+          <div style="padding:11px 14px 2px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#5b636d">CORNER-PIN · exact corners (m)</div>
+          <div style="padding:4px 14px;display:flex;flex-direction:column;gap:7px">
+            <sc-for list="{{ warpCornerRows }}" as="c" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="width:48px;display:flex;flex-direction:column;line-height:1.15;flex:0 0 auto"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#cdd4dc;font-weight:600">{{ c.tag }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;color:#00e5ff">→ {{ c.norm }}</span></span>
+                <input value="{{ c.x }}" onChange="{{ c.onX }}" style="flex:1;min-width:0;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px">
+                <input value="{{ c.y }}" onChange="{{ c.onY }}" style="flex:1;min-width:0;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px">
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:8px;padding:10px 14px 4px">
+            <button onClick="{{ warpToolBtn }}" style="flex:1;height:34px;border-radius:7px;border:1px solid rgba(0,229,255,0.3);background:rgba(0,229,255,0.07);color:#a9e8f1;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.04em">DRAG ON MAP</button>
+            <button onClick="{{ resetWarp }}" style="flex:1;height:34px;border-radius:7px;border:1px solid rgba(255,255,255,0.1);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.04em">RESET</button>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px 6px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#5b636d">OUTPUT MONITOR · live mapping feed</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:{{ projWinDotColor }}">{{ projWinLabel }}</span>
+          </div>
+          <div style="flex:0 0 auto;margin:0 14px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);background:#000;height:152px;position:relative">
+            <canvas ref="{{ monitorCanvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+            <sc-if value="{{ ndiBadge }}" hint-placeholder-val="{{ false }}">
+              <span style="position:absolute;top:8px;left:8px;display:flex;align-items:center;gap:5px;padding:3px 8px;border-radius:20px;background:rgba(255,77,94,0.18);border:1px solid rgba(255,77,94,0.5);font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffc2c9"><span style="width:6px;height:6px;border-radius:50%;background:#ff4d5e;animation:blink 1.2s infinite"></span>NDI</span>
+            </sc-if>
+          </div>
+          <div style="display:flex;gap:6px;padding:8px 14px 0">
+            <button onClick="{{ toggleProjGrid }}" style="flex:1;height:30px;border-radius:6px;border:1px solid {{ pgGridBd }};background:{{ pgGridBg }};color:{{ pgGridCol }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em">GRID</button>
+            <button onClick="{{ toggleProjLabels }}" style="flex:1;height:30px;border-radius:6px;border:1px solid {{ pgLabBd }};background:{{ pgLabBg }};color:{{ pgLabCol }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em">LABELS</button>
+            <button onClick="{{ toggleProjTest }}" style="flex:1;height:30px;border-radius:6px;border:1px solid {{ pgTestBd }};background:{{ pgTestBg }};color:{{ pgTestCol }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em">TEST</button>
+          </div>
+          <div style="padding:10px 14px 4px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.14em;color:#5b636d">OUTPUT MODE</div>
+          <div style="padding:0 14px 6px;display:flex;gap:6px">
+            <button onClick="{{ setModeWindow }}" style="flex:1;height:30px;border-radius:6px;border:1px solid {{ outModeWindowSeg.bd }};background:{{ outModeWindowSeg.bg }};color:{{ outModeWindowSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.03em">WINDOW</button>
+            <button onClick="{{ setModeExt }}" style="flex:1;height:30px;border-radius:6px;border:1px solid {{ outModeExtSeg.bd }};background:{{ outModeExtSeg.bg }};color:{{ outModeExtSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.03em">EXTENDED</button>
+            <button onClick="{{ setModeNdi }}" style="flex:1;height:30px;border-radius:6px;border:1px solid {{ outModeNdiSeg.bd }};background:{{ outModeNdiSeg.bg }};color:{{ outModeNdiSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.03em">NDI</button>
+          </div>
+          <sc-if value="{{ isNdiMode }}" hint-placeholder-val="{{ false }}">
+            <div style="margin:2px 14px 6px;padding:10px;border-radius:7px;background:#0e1216;border:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;gap:8px">
+              <label style="display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">NDI SOURCE NAME</span><input value="{{ ndiName }}" onChange="{{ onNdiName }}" style="width:100%;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0b0e11;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"></label>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">RESOLUTION (px)</span>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <input value="{{ ndiW }}" onChange="{{ onNdiW }}" style="flex:1;min-width:0;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0b0e11;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:center">
+                  <span style="color:#5b636d;font-family:'IBM Plex Mono',monospace;font-size:12px;flex:0 0 auto">×</span>
+                  <input value="{{ ndiH }}" onChange="{{ onNdiH }}" style="flex:1;min-width:0;height:28px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0b0e11;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:center">
+                  <span style="flex:0 0 auto;padding:0 7px;height:28px;display:flex;align-items:center;border-radius:5px;background:#0b0e11;border:1px solid rgba(255,255,255,0.06);color:#717a84;font-family:'IBM Plex Mono',monospace;font-size:10px">{{ ndiAspect }}</span>
+                </div>
+                <div style="display:flex;gap:5px">
+                  <button onClick="{{ setRes720 }}" style="flex:1;height:24px;border-radius:5px;border:1px solid {{ res720Seg.bd }};background:{{ res720Seg.bg }};color:{{ res720Seg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:0">720p</button>
+                  <button onClick="{{ setRes1080 }}" style="flex:1;height:24px;border-radius:5px;border:1px solid {{ res1080Seg.bd }};background:{{ res1080Seg.bg }};color:{{ res1080Seg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:0">1080p</button>
+                  <button onClick="{{ setRes1440 }}" style="flex:1;height:24px;border-radius:5px;border:1px solid {{ res1440Seg.bd }};background:{{ res1440Seg.bg }};color:{{ res1440Seg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:0">1440p</button>
+                  <button onClick="{{ setRes4k }}" style="flex:1;height:24px;border-radius:5px;border:1px solid {{ res4kSeg.bd }};background:{{ res4kSeg.bg }};color:{{ res4kSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:0">4K</button>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">SCALE MODE</span>
+                <div style="display:flex;gap:6px">
+                  <button onClick="{{ setFitFit }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ fitFitSeg.bd }};background:{{ fitFitSeg.bg }};color:{{ fitFitSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">FIT</button>
+                  <button onClick="{{ setFitFill }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ fitFillSeg.bd }};background:{{ fitFillSeg.bg }};color:{{ fitFillSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">FILL</button>
+                  <button onClick="{{ setFitStretch }}" style="flex:1;height:28px;border-radius:5px;border:1px solid {{ fitStretchSeg.bd }};background:{{ fitStretchSeg.bg }};color:{{ fitStretchSeg.col }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px">STRETCH</button>
+                </div>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5b636d;line-height:1.4">{{ fitDesc }}</span>
+              </div>
+              <label style="display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">FPS</span><select value="{{ ndiFps }}" onChange="{{ onNdiFps }}" style="width:100%;height:28px;padding:0 6px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0b0e11;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11px"><option value="30">30</option><option value="60">60</option></select></label>
+              <div style="display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:9.5px">
+                <span style="color:#717a84">STATUS</span>
+                <span style="display:flex;align-items:center;gap:6px;color:{{ ndiStatusColor }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ ndiStatusColor }}"></span>{{ ndiStatusLabel }}</span>
+              </div>
+            </div>
+          </sc-if>
+          <div style="display:flex;gap:6px;padding:2px 14px 14px">
+            <button onClick="{{ openOutput }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;height:38px;border-radius:8px;border:1px solid {{ outBtnBd }};background:{{ outBtnBg }};color:{{ outBtnCol }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.04em">{{ outBtnLabel }} {{ outBtnIcon }}</button>
+            <sc-if value="{{ projWinOpen }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ closeProjectorWindow }}" style="width:42px;height:38px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:14px;padding:0">&times;</button>
+            </sc-if>
+          </div>
+
+          <div style="padding:0 10px 16px;display:flex;flex-direction:column;gap:4px">
+            <sc-for list="{{ warpObjects }}" as="o" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;padding:7px 8px;border-radius:6px;background:#10141a;border:1px solid rgba(255,255,255,0.05);font-family:'IBM Plex Mono',monospace;font-size:11px">
+                <span style="width:38px;display:flex;align-items:center;gap:6px;flex:0 0 auto"><span style="width:8px;height:8px;border-radius:50%;background:{{ o.color }};box-shadow:0 0 6px {{ o.color }}"></span><span style="color:#cdd4dc">{{ o.id }}</span></span>
+                <span style="flex:1;color:{{ o.valColor }}"><span style="color:#5b636d">u</span> {{ o.u }}</span>
+                <span style="flex:1;color:{{ o.valColor }}"><span style="color:#5b636d">v</span> {{ o.v }}</span>
+                <span style="width:40px;text-align:right;color:{{ o.tagColor }}">{{ o.tag }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isOut }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto">
+          <div style="padding:13px 14px 4px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#5b636d">PROTOCOL</div>
+          <div style="display:flex;gap:6px;padding:6px 14px 12px">
+            <button onClick="{{ setOsc }}" style="flex:1;position:relative;height:40px;border-radius:7px;border:1px solid {{ oscBorder }};background:{{ oscBg }};color:{{ oscColor }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:0.06em">OSC<div style="font-size:8px;color:#5b636d;letter-spacing:0.04em">UDP datagram</div></button>
+            <button onClick="{{ setTuio }}" style="flex:1;position:relative;height:40px;border-radius:7px;border:1px solid {{ tuioBorder }};background:{{ tuioBg }};color:{{ tuioColor }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:0.06em">TUIO<div style="font-size:8px;color:#5b636d;letter-spacing:0.04em">2D object profile</div></button>
+          </div>
+
+          <div style="padding:0 14px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;gap:8px">
+              <label style="flex:2;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">TARGET HOST</span><input value="{{ host }}" onChange="{{ onHost }}" style="width:100%;height:30px;padding:0 9px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11.5px"></label>
+              <label style="flex:1;display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">PORT</span><input value="{{ port }}" onChange="{{ onPort }}" style="width:100%;height:30px;padding:0 9px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11.5px"></label>
+            </div>
+            <label style="display:flex;flex-direction:column;gap:4px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#717a84;letter-spacing:0.08em">SEND RATE</span>
+              <select value="{{ sendRate }}" onChange="{{ onRate }}" style="width:100%;height:30px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:#0e1216;color:#e8ecf1;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+                <option value="10">10 Hz</option><option value="30">30 Hz</option><option value="60">60 Hz</option>
+              </select>
+            </label>
+            <div style="padding:9px 10px;border-radius:6px;background:#0e1216;border:1px solid rgba(255,255,255,0.06)">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;color:#717a84;letter-spacing:0.1em;margin-bottom:4px">ADDRESS PATTERN</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#00e5ff;word-break:break-all">{{ addrPreview }}</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 14px 6px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#5b636d">MESSAGE MONITOR</span>
+            <span style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#39ff7a"><span style="width:6px;height:6px;border-radius:50%;background:#39ff7a;animation:blink 1.2s infinite"></span>{{ sendState }}</span>
+          </div>
+          <div style="margin:0 12px 14px;padding:9px 10px;border-radius:7px;background:#08090b;border:1px solid rgba(255,255,255,0.06);height:172px;overflow-y:auto;display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ oscLog }}" as="l" hint-placeholder-count="8">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{ l.color }};white-space:nowrap">{{ l.text }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div style="height:62px;flex:0 0 auto;background:#0e1115;border-top:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;gap:16px;padding:0 16px">
+    <button onClick="{{ toggleRecord }}" style="display:flex;align-items:center;gap:9px;height:36px;padding:0 15px;border-radius:8px;border:1px solid {{ recRingBorder }};background:{{ recRingBg }};color:#ffd2d7;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:0.06em">
+      <span style="width:11px;height:11px;border-radius:{{ recDotRadius }};background:#ff4d5e"></span>
+      {{ recLongLabel }}
+    </button>
+
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;letter-spacing:0.04em;color:{{ recTimeColor }};min-width:96px">{{ recTimeStr }}</div>
+
+    <div style="flex:1;height:30px;border-radius:7px;background:#0a0c0f;border:1px solid rgba(255,255,255,0.07);position:relative;overflow:hidden">
+      <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,transparent 0,transparent 59px,rgba(255,255,255,0.05) 59px,rgba(255,255,255,0.05) 60px)"></div>
+      <div style="position:absolute;left:0;top:0;bottom:0;width:{{ playWidth }};background:linear-gradient(90deg,rgba(255,77,94,0.05),rgba(255,77,94,0.22));border-right:1.5px solid #ff4d5e"></div>
+      <div style="position:absolute;left:0;bottom:5px;display:flex;gap:0;align-items:center;padding-left:8px;height:18px"></div>
+    </div>
+
+    <div style="display:flex;gap:5px">
+      <sc-for list="{{ takeRows }}" as="tk" hint-placeholder-count="2">
+        <div style="display:flex;flex-direction:column;justify-content:center;padding:5px 11px;border-radius:6px;background:#13171c;border:1px solid rgba(255,255,255,0.08);min-width:78px">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#cdd4dc">{{ tk.name }}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5b636d">{{ tk.dur }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;gap:4px;align-items:center">
+      <button style="width:32px;height:32px;border-radius:6px;border:1px solid rgba(255,255,255,0.09);background:#13171c;color:#9aa3ad;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0"><svg width="13" height="13" viewBox="0 0 16 16"><polygon points="13,2 13,14 5,8" fill="currentColor"/><rect x="3" y="2" width="2" height="12" fill="currentColor"/></svg></button>
+      <button style="width:36px;height:36px;border-radius:6px;border:1px solid rgba(0,229,255,0.25);background:rgba(0,229,255,0.08);color:#00e5ff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0"><svg width="13" height="13" viewBox="0 0 16 16"><polygon points="3,2 14,8 3,14" fill="currentColor"/></svg></button>
+      <button style="width:32px;height:32px;border-radius:6px;border:1px solid rgba(255,255,255,0.09);background:#13171c;color:#9aa3ad;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0"><svg width="13" height="13" viewBox="0 0 16 16"><polygon points="3,2 3,14 11,8" fill="currentColor"/><rect x="11" y="2" width="2" height="12" fill="currentColor"/></svg></button>
+    </div>
+  </div>
+
+  <sc-if value="{{ projectorOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:80;background:#000">
+      <div ref="{{ projWrapRef }}" style="position:absolute;inset:0;background:#000">
+        <canvas ref="{{ projCanvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+      </div>
+
+      <sc-if value="{{ projChrome }}" hint-placeholder-val="{{ true }}">
+        <div style="position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:14px;padding:16px 20px;background:linear-gradient(180deg,rgba(0,0,0,0.85),rgba(0,0,0,0));pointer-events:none">
+          <div style="display:flex;align-items:center;gap:9px">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1" stroke="#00e5ff" stroke-width="1.3"/><circle cx="8" cy="6.7" r="1.6" fill="#00e5ff"/></svg>
+            <div style="line-height:1.1">
+              <div style="font-weight:700;letter-spacing:0.05em;font-size:13px;color:#e8ecf1">PROJECTOR CALIBRATION OUTPUT</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:#5b636d">drag this window to your projector display · press F for fullscreen</div>
+            </div>
+          </div>
+          <div style="flex:1"></div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{ projWarpColor }};padding:5px 11px;border:1px solid rgba(255,255,255,0.12);border-radius:20px">{{ projWarpState }}</div>
+        </div>
+
+        <div style="position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:9px;padding:18px;background:linear-gradient(0deg,rgba(0,0,0,0.85),rgba(0,0,0,0))">
+          <button onClick="{{ closeProjector }}" style="display:flex;align-items:center;gap:7px;height:38px;padding:0 15px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:#13171c;color:#cdd4dc;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:0.04em">&#8592; EXIT</button>
+          <button onClick="{{ projFullscreen }}" style="display:flex;align-items:center;gap:7px;height:38px;padding:0 15px;border-radius:8px;border:1px solid rgba(0,229,255,0.4);background:rgba(0,229,255,0.1);color:#cfeef5;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:0.04em">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>FULLSCREEN
+          </button>
+          <div style="width:1px;height:24px;background:rgba(255,255,255,0.12);margin:0 4px"></div>
+          <button onClick="{{ toggleProjGrid }}" style="height:38px;padding:0 14px;border-radius:8px;border:1px solid {{ pgGridBd }};background:{{ pgGridBg }};color:{{ pgGridCol }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em">GRID</button>
+          <button onClick="{{ toggleProjLabels }}" style="height:38px;padding:0 14px;border-radius:8px;border:1px solid {{ pgLabBd }};background:{{ pgLabBg }};color:{{ pgLabCol }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em">LABELS</button>
+          <button onClick="{{ toggleProjTest }}" style="height:38px;padding:0 14px;border-radius:8px;border:1px solid {{ pgTestBd }};background:{{ pgTestBg }};color:{{ pgTestCol }};cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em">TEST</button>
+          <div style="display:flex;align-items:center;gap:9px;height:38px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:#13171c">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#717a84;letter-spacing:0.04em">BRIGHT</span>
+            <input type="range" min="0.2" max="1" step="0.05" value="{{ projBright }}" onChange="{{ onProjBright }}" style="width:90px;accent-color:#00e5ff">
+          </div>
+          <div style="width:1px;height:24px;background:rgba(255,255,255,0.12);margin:0 4px"></div>
+          <button onClick="{{ toggleProjChrome }}" style="height:38px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:#13171c;color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em">HIDE UI &nbsp;<span style="color:#5b636d">H</span></button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ projChromeOff }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ toggleProjChrome }}" title="show controls" style="position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(19,23,28,0.6);color:#9aa3ad;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;opacity:0.4">UI</button>
+      </sc-if>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  canvasRef = React.createRef();
+  wrapRef = React.createRef();
+  coordRef = React.createRef();
+  projCanvasRef = React.createRef();
+  projWrapRef = React.createRef();
+  monitorCanvasRef = React.createRef();
+  state = {
+    streaming: true, recording: false, recordTime: 0,
+    fps: 0, pointCount: 0, latency: '10.0',
+    selectedSensor: 'a3',
+    rightTab: 'tracking',
+    protocol: 'osc', host: '127.0.0.1', port: '7000', sendRate: '30',
+    tool: 'select', drafting: false, draftCount: 0,
+    connType: 'serial', comPort: 'COM4', baudrate: '1000000', netProto: 'udp', ipAddr: '192.168.11.2', ipPort: '8089', scanMode: 'express', precision: '2', quality: false, distMin: '0.0', distMax: '25.0', coordSys: 'cartesian',
+    bgCaptured: false, bgSubtract: false, bgTol: 0.18, bgShow: true, bgHide: true,
+    warpEnabled: false, warpCorners: [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]], warpStep: 0.1, warpSelCount: 0, warpRotStep: 15, canUndo: false, canRedo: false,
+    projectorOpen: false, projWinOpen: false, projGrid: true, projLabels: true, projTest: false, projChrome: true, projBright: 1,
+    outputMode: 'window', ndiName: 'LidarBridge-Mapping', ndiW: '1920', ndiH: '1080', ndiFps: '60', ndiFit: 'fit', ndiOn: false,
+    calX: '0.00', calY: '0.00', calRot: '0.0',
+    objects: [
+      { id: '01', x: '-1.84', y: '1.52', v: '0.41', zone: 'Entry', color: '#00e5ff', zoneColor: '#00e5ff' },
+      { id: '02', x: '1.20', y: '3.05', v: '0.62', zone: '\u2014', color: '#39ff7a', zoneColor: '#5b636d' },
+      { id: '03', x: '2.74', y: '4.61', v: '0.28', zone: 'Stage Front', color: '#ffb000', zoneColor: '#00e5ff' },
+      { id: '04', x: '-1.02', y: '3.98', v: '0.55', zone: '\u2014', color: '#ff5d8f', zoneColor: '#5b636d' }
+    ],
+    zones: [
+      { name: 'Stage Front', visible: true, occupied: true, count: 4 },
+      { name: 'Entry', visible: true, occupied: false, count: 4 }
+    ],
+    oscLog: [
+      { text: '/lidar/trk/01  -1.84  1.52  0.41', color: '#7c8893' },
+      { text: '/lidar/zone/entry  1', color: '#00e5ff' },
+      { text: '/lidar/trk/03  2.74  4.61  0.28', color: '#7c8893' },
+      { text: '/lidar/trk/02  1.20  3.05  0.62', color: '#7c8893' }
+    ],
+    takes: [ { name: 'Take 01', dur: '01:24' }, { name: 'Take 02', dur: '00:46' } ]
+  };
+
+  SENSORS = [
+    { id: 'a3', name: 'RPLIDAR A3', range: '25m', hz: '10', status: 'online', cfg: { connType: 'serial', comPort: 'COM4', baudrate: '1000000', netProto: 'udp', ipAddr: '192.168.11.2', ipPort: '8089', scanMode: 'express', precision: '2', quality: false, distMin: '0.0', distMax: '25.0', coordSys: 'cartesian' } },
+    { id: 's2e', name: 'RPLIDAR S2E', range: '30m', hz: '10', status: 'online', cfg: { connType: 'network', comPort: 'COM5', baudrate: '1000000', netProto: 'udp', ipAddr: '192.168.11.2', ipPort: '8089', scanMode: 'standard', precision: '2', quality: true, distMin: '0.0', distMax: '30.0', coordSys: 'cartesian' } },
+    { id: 'a2', name: 'RPLIDAR A2', range: '12m', hz: '10', status: 'offline', cfg: { connType: 'serial', comPort: 'COM3', baudrate: '115200', netProto: 'udp', ipAddr: '192.168.11.2', ipPort: '8089', scanMode: 'standard', precision: '1', quality: false, distMin: '0.0', distMax: '12.0', coordSys: 'cartesian' } }
+  ];
+  RANGE = 9; RAYS = 540;
+  ensureCfgs() { if (!this.cfgs) { this.cfgs = {}; this.SENSORS.forEach(s => { this.cfgs[s.id] = Object.assign({}, s.cfg); }); } return this.cfgs; }
+
+  componentDidMount() {
+    const canvas = this.canvasRef.current;
+    const wrap = this.wrapRef.current;
+    if (!canvas || !wrap) return;
+    const ctx = canvas.getContext('2d');
+    const WC = { x: 0, y: 2.75 };
+    const RAYS = this.RAYS, RANGE = this.RANGE;
+    const PERIOD = 900;
+    const walls = [
+      [-4, -0.5, 4, -0.5], [4, -0.5, 4, 6], [4, 6, -4, 6], [-4, 6, -4, -0.5]
+    ];
+    const blobs = [
+      { id: '01', x: -2, y: 1.5, tx: -1, ty: 2.5, vx: 0, vy: 0, r: 0.28, speed: 0.62, color: '#00e5ff', hist: [], _h: 0 },
+      { id: '02', x: 1.5, y: 3, tx: 2, ty: 2, vx: 0, vy: 0, r: 0.28, speed: 0.78, color: '#39ff7a', hist: [], _h: 0 },
+      { id: '03', x: 2.7, y: 4.6, tx: 1, ty: 4, vx: 0, vy: 0, r: 0.28, speed: 0.5, color: '#ffb000', hist: [], _h: 0 },
+      { id: '04', x: -1, y: 4, tx: -2, ty: 3, vx: 0, vy: 0, r: 0.28, speed: 0.7, color: '#ff5d8f', hist: [], _h: 0 }
+    ];
+    const points = [];
+    for (let i = 0; i < RAYS; i++) points.push({ x: 0, y: 0, t: -PERIOD, hit: false });
+    this.sim = {
+      blobs, walls, points, sweep: 0, sweepDisp: 0, draft: [],
+      zones: [
+        { name: 'Stage Front', pts: [[-2.5, 3.5], [2.5, 3.5], [2.5, 5.5], [-2.5, 5.5]], visible: true, occupied: false },
+        { name: 'Entry', pts: [[-3.6, 0.2], [-1.6, 0.2], [-1.6, 1.8], [-3.6, 1.8]], visible: true, occupied: false }
+      ],
+      warp: { enabled: false, corners: [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]], Hfwd: null, Hinv: null },
+      ft: [], fps: 0
+    };
+    this.recomputeWarp();
+    this.view = { z: 1, panX: 0, panY: 0 };
+    this.W = wrap.clientWidth; this.H = wrap.clientHeight; this.baseScale = 60;
+
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      this.W = wrap.clientWidth; this.H = wrap.clientHeight;
+      canvas.width = this.W * dpr; canvas.height = this.H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.baseScale = Math.min(this.W / 9.2, this.H / 7.4);
+    };
+    resize();
+    const ro = new ResizeObserver(resize); ro.observe(wrap); this._ro = ro;
+
+    const scale = () => this.baseScale * this.view.z;
+    const wts = (wx, wy) => {
+      const s = scale();
+      return [this.W / 2 + (wx - WC.x) * s + this.view.panX, this.H / 2 - (wy - WC.y) * s + this.view.panY];
+    };
+    const stw = (sx, sy) => {
+      const s = scale();
+      return [(sx - this.W / 2 - this.view.panX) / s + WC.x, WC.y - (sy - this.H / 2 - this.view.panY) / s];
+    };
+    this._stw = stw; this._wts = wts;
+
+    const raySeg = (ox, oy, dx, dy, sg) => {
+      const ex = sg[2] - sg[0], ey = sg[3] - sg[1];
+      const den = dx * (-ey) - (-ex) * dy;
+      if (Math.abs(den) < 1e-9) return -1;
+      const t = (-(sg[0] - ox) * ey + ex * (sg[1] - oy)) / den;
+      const u = (dx * (sg[1] - oy) - dy * (sg[0] - ox)) / den;
+      if (t > 0 && u >= 0 && u <= 1) return t;
+      return -1;
+    };
+    const rayCircle = (ox, oy, dx, dy, cx, cy, r) => {
+      const fx = ox - cx, fy = oy - cy;
+      const b = 2 * (fx * dx + fy * dy), c = fx * fx + fy * fy - r * r;
+      const disc = b * b - 4 * c;
+      if (disc < 0) return -1;
+      const sq = Math.sqrt(disc);
+      let t = (-b - sq) / 2; if (t > 0) return t;
+      t = (-b + sq) / 2; return t > 0 ? t : -1;
+    };
+    const castWalls = (a) => {
+      const dx = Math.cos(a), dy = Math.sin(a);
+      let best = Infinity;
+      for (const sg of walls) { const t = raySeg(0, 0, dx, dy, sg); if (t > 0 && t < best) best = t; }
+      return best;
+    };
+    this._castWalls = castWalls;
+    const cast = (a) => {
+      const dx = Math.cos(a), dy = Math.sin(a);
+      let best = castWalls(a);
+      for (const b of blobs) { const t = rayCircle(0, 0, dx, dy, b.x, b.y, b.r); if (t > 0 && t < best) best = t; }
+      return best;
+    };
+    const pip = (px, py, poly) => {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+        if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside;
+      }
+      return inside;
+    };
+    this._pip = pip;
+
+    const step = 2 * Math.PI / RAYS;
+    const update = (dt, now) => {
+      const speed = 2 * Math.PI / 0.85;
+      let target = this.sim.sweep + speed * dt;
+      const i0 = Math.floor(this.sim.sweep / step), i1 = Math.floor(target / step);
+      const cnt = Math.min(i1 - i0, RAYS);
+      for (let k = 1; k <= cnt; k++) {
+        const idx = ((i0 + k) % RAYS + RAYS) % RAYS;
+        const a = idx * step, d = cast(a), pt = this.sim.points[idx];
+        if (d < RANGE) {
+          pt.hit = true; pt.d = d;
+          pt.x = Math.cos(a) * d + (Math.random() - 0.5) * 0.03; pt.y = Math.sin(a) * d + (Math.random() - 0.5) * 0.03;
+          const bg = this.sim.bg;
+          pt.fg = bg ? (d < bg[idx] - this.state.bgTol) : true;
+        }
+        else { pt.hit = false; pt.fg = false; }
+        pt.t = now;
+      }
+      this.sim.sweep = target; this.sim.sweepDisp = target % (2 * Math.PI);
+      for (const b of blobs) {
+        const dx = b.tx - b.x, dy = b.ty - b.y, dist = Math.hypot(dx, dy);
+        if (dist < 0.25) { b.tx = -3.4 + Math.random() * 6.8; b.ty = 0.1 + Math.random() * 5.4; b.vx = 0; b.vy = 0; }
+        else { b.vx = dx / dist * b.speed; b.vy = dy / dist * b.speed; b.x += b.vx * dt; b.y += b.vy * dt; }
+        b._h += dt; if (b._h > 0.09) { b._h = 0; b.hist.push([b.x, b.y]); if (b.hist.length > 16) b.hist.shift(); }
+      }
+    };
+
+    const draw = (now) => {
+      const W = this.W, H = this.H, s = scale();
+      ctx.clearRect(0, 0, W, H);
+      // cartesian grid
+      ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+      for (let gx = -4; gx <= 4; gx++) { const [x1, y1] = wts(gx, -0.5), [, y2] = wts(gx, 6); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1, y2); ctx.stroke(); }
+      for (let gy = 0; gy <= 6; gy++) { const [x1, y1] = wts(-4, gy), [x2] = wts(4, gy); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y1); ctx.stroke(); }
+      // range rings
+      const [ox, oy] = wts(0, 0);
+      ctx.strokeStyle = 'rgba(0,229,255,0.07)';
+      for (let r = 1.5; r <= RANGE; r += 1.5) { ctx.beginPath(); ctx.arc(ox, oy, r * s, 0, 2 * Math.PI); ctx.stroke(); }
+      // zones
+      for (const z of this.sim.zones) {
+        if (!z.visible) continue;
+        ctx.beginPath();
+        z.pts.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+        ctx.closePath();
+        ctx.fillStyle = z.occupied ? 'rgba(0,229,255,0.16)' : 'rgba(0,229,255,0.05)';
+        ctx.fill();
+        ctx.lineWidth = z.occupied ? 1.8 : 1.2;
+        ctx.strokeStyle = z.occupied ? 'rgba(0,229,255,0.9)' : 'rgba(0,229,255,0.4)';
+        ctx.stroke();
+        const c = z.pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]).map(v => v / z.pts.length);
+        const [cx, cy] = wts(c[0], c[1]);
+        ctx.fillStyle = z.occupied ? '#bff3fb' : 'rgba(0,229,255,0.55)';
+        ctx.font = "600 11px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center';
+        ctx.fillText(z.name.toUpperCase(), cx, cy);
+      }
+      // point cloud
+      // captured background outline (ghost)
+      if (this.sim.bg && this.state.bgShow) {
+        ctx.save(); ctx.beginPath();
+        for (let i = 0; i < RAYS; i++) { const bd = this.sim.bg[i]; if (bd >= RANGE) continue; const a2 = i * step; const px = Math.cos(a2) * bd, py = Math.sin(a2) * bd; const [sx, sy] = wts(px, py); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }
+        ctx.strokeStyle = 'rgba(255,176,0,0.32)'; ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+      }
+      // point cloud
+      const sub = this.state.bgSubtract && this.sim.bg;
+      for (const p of this.sim.points) {
+        if (!p.hit) continue;
+        const isBg = sub && !p.fg;
+        if (isBg && this.state.bgHide) continue;
+        const age = now - p.t, fresh = Math.max(0, 1 - age / PERIOD);
+        const [sx, sy] = wts(p.x, p.y);
+        if (isBg) { ctx.fillStyle = 'rgba(120,130,140,' + (0.1 + 0.12 * fresh) + ')'; ctx.fillRect(sx - 0.8, sy - 0.8, 1.6, 1.6); continue; }
+        if (sub && p.fg) {
+          const a = 0.3 + 0.7 * fresh;
+          ctx.fillStyle = 'rgba(57,255,122,' + a + ')'; ctx.fillRect(sx - 1.3, sy - 1.3, 2.8, 2.8); continue;
+        }
+        const a = 0.14 + 0.82 * fresh;
+        if (fresh > 0.82) { ctx.fillStyle = 'rgba(210,248,255,' + a + ')'; ctx.fillRect(sx - 1.2, sy - 1.2, 2.6, 2.6); }
+        else { ctx.fillStyle = 'rgba(0,210,238,' + a + ')'; ctx.fillRect(sx - 0.9, sy - 0.9, 1.8, 1.8); }
+      }
+      // sweep line
+      const ang = this.sim.sweepDisp;
+      const [ex, ey] = wts(Math.cos(ang) * RANGE, Math.sin(ang) * RANGE);
+      const grad = ctx.createLinearGradient(ox, oy, ex, ey);
+      grad.addColorStop(0, 'rgba(0,229,255,0.5)'); grad.addColorStop(1, 'rgba(0,229,255,0)');
+      ctx.strokeStyle = grad; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+      // blobs
+      for (const b of blobs) {
+        ctx.strokeStyle = b.color + '33'; ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        b.hist.forEach((h, i) => { const [hx, hy] = wts(h[0], h[1]); i ? ctx.lineTo(hx, hy) : ctx.moveTo(hx, hy); }); ctx.stroke();
+        const [bx, by] = wts(b.x, b.y);
+        ctx.beginPath(); ctx.arc(bx, by, 0.32 * s, 0, 2 * Math.PI);
+        ctx.strokeStyle = b.color; ctx.lineWidth = 1.6; ctx.stroke();
+        ctx.fillStyle = b.color + '22'; ctx.fill();
+        ctx.strokeStyle = b.color + '99'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(bx - 0.32 * s, by); ctx.lineTo(bx + 0.32 * s, by); ctx.moveTo(bx, by - 0.32 * s); ctx.lineTo(bx, by + 0.32 * s); ctx.stroke();
+        ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(bx, by, 3, 0, 2 * Math.PI); ctx.fill();
+        const v = Math.hypot(b.vx, b.vy);
+        if (v > 0.05) { const ux = b.vx / v, uy = b.vy / v; const [ax, ay] = wts(b.x + ux * 0.7, b.y + uy * 0.7); ctx.strokeStyle = b.color; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ax, ay); ctx.stroke(); }
+        const label = b.id + '  ' + b.x.toFixed(2) + ',' + b.y.toFixed(2);
+        ctx.font = "500 10px 'IBM Plex Mono', monospace"; ctx.textAlign = 'left';
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(10,12,16,0.82)'; ctx.fillRect(bx + 0.36 * s, by - 0.5 * s - 7, tw + 10, 15);
+        ctx.fillStyle = b.color; ctx.fillRect(bx + 0.36 * s, by - 0.5 * s - 7, 2.5, 15);
+        ctx.fillStyle = '#d6dde4'; ctx.fillText(label, bx + 0.36 * s + 7, by - 0.5 * s + 2.5);
+      }
+      // draft zone
+      if (this.sim.draft.length) {
+        ctx.strokeStyle = 'rgba(0,229,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        this.sim.draft.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+        ctx.stroke(); ctx.setLineDash([]);
+        for (const p of this.sim.draft) { const [sx, sy] = wts(p[0], p[1]); ctx.fillStyle = '#00e5ff'; ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, 2 * Math.PI); ctx.fill(); }
+      }
+      // sensor marker
+      ctx.save(); ctx.translate(ox, oy);
+      ctx.strokeStyle = 'rgba(0,229,255,0.18)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, 0, RANGE * s, 0, 2 * Math.PI); ctx.stroke();
+      ctx.fillStyle = '#00e5ff'; ctx.shadowColor = '#00e5ff'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(0, 0, 6, 0, 2 * Math.PI); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#06181c'; ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, 2 * Math.PI); ctx.fill();
+      ctx.restore();
+
+      // warp / corner-pin overlay
+      const wp = this.sim.warp;
+      const showWarp = this.state.tool === 'warp' || this.state.rightTab === 'warp' || wp.enabled;
+      if (showWarp && wp.Hinv) {
+        const c = wp.corners, Hi = wp.Hinv;
+        const on = wp.enabled;
+        const interactive = this.state.tool === 'warp' || this.state.rightTab === 'warp';
+        const mapU = (u, v) => { const d = Hi[6] * u + Hi[7] * v + 1; return [(Hi[0] * u + Hi[1] * v + Hi[2]) / d, (Hi[3] * u + Hi[4] * v + Hi[5]) / d]; };
+        // fill
+        ctx.beginPath(); c.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath();
+        ctx.fillStyle = on ? 'rgba(0,229,255,0.07)' : 'rgba(139,160,170,0.045)'; ctx.fill();
+        // perspective grid
+        const N = 8; ctx.lineWidth = 1; ctx.strokeStyle = on ? 'rgba(0,229,255,0.26)' : 'rgba(139,160,170,0.2)';
+        for (let i = 1; i < N; i++) {
+          const u = i / N;
+          let a = mapU(u, 0), b = mapU(u, 1); let pa = wts(a[0], a[1]), pb = wts(b[0], b[1]);
+          ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
+          let cc = mapU(0, u), dd = mapU(1, u); let pc = wts(cc[0], cc[1]), pd = wts(dd[0], dd[1]);
+          ctx.beginPath(); ctx.moveTo(pc[0], pc[1]); ctx.lineTo(pd[0], pd[1]); ctx.stroke();
+        }
+        // outline
+        ctx.beginPath(); c.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath();
+        ctx.lineWidth = 2; ctx.strokeStyle = on ? '#00e5ff' : '#8fa3ad'; ctx.stroke();
+        // corner handles (selection-aware)
+        const labels = ['0,0', '1,0', '1,1', '0,1'];
+        const sel = this.warpSel || [];
+        c.forEach((p, i) => {
+          const [sx, sy] = wts(p[0], p[1]);
+          const isSel = sel.indexOf(i) >= 0;
+          const r = interactive ? (isSel ? 8 : 6) : 5;
+          ctx.beginPath(); ctx.arc(sx, sy, r, 0, 2 * Math.PI);
+          ctx.fillStyle = isSel ? '#ffffff' : (on ? '#00e5ff' : '#8fa3ad');
+          ctx.shadowColor = (on || isSel) ? '#00e5ff' : 'transparent'; ctx.shadowBlur = isSel ? 13 : (interactive ? 8 : 0); ctx.fill(); ctx.shadowBlur = 0;
+          if (isSel) { ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2; ctx.stroke(); }
+          else { ctx.fillStyle = '#06181c'; ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, 2 * Math.PI); ctx.fill(); }
+          if (interactive) {
+            ctx.font = "600 10px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+            ctx.fillStyle = isSel ? '#ffffff' : (on ? '#bff3fb' : '#b9c6cd'); ctx.fillText('(' + labels[i] + ')', sx, sy - 14);
+          }
+        });
+        // bounding box + scale handles when >=2 selected
+        if (interactive && sel.length >= 2) {
+          const xs = sel.map(i => c[i][0]), ys = sel.map(i => c[i][1]);
+          const bx0 = Math.min.apply(null, xs), bx1 = Math.max.apply(null, xs), by0 = Math.min.apply(null, ys), by1 = Math.max.apply(null, ys);
+          const bcw = [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]];
+          const q = bcw.map(p => wts(p[0], p[1]));
+          ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1;
+          ctx.beginPath(); q.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+          const cenx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, ceny = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+          const OFF = 16;
+          this._bboxHandles = bcw.map((cw, i) => {
+            let hx = q[i][0], hy = q[i][1]; const vx = hx - cenx, vy = hy - ceny, L = Math.hypot(vx, vy) || 1;
+            hx += vx / L * OFF; hy += vy / L * OFF;
+            const aw = [cw[0] === bx0 ? bx1 : bx0, cw[1] === by0 ? by1 : by0];
+            return { sx: hx, sy: hy, cw, aw };
+          });
+          for (const h of this._bboxHandles) { ctx.fillStyle = '#ffffff'; ctx.fillRect(h.sx - 4, h.sy - 4, 8, 8); ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.5; ctx.strokeRect(h.sx - 4, h.sy - 4, 8, 8); }
+        } else { this._bboxHandles = null; }
+        // marquee rectangle (screen space)
+        if (this.warpMarquee) {
+          const m = this.warpMarquee, x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1), w = Math.abs(m.x1 - m.x0), h = Math.abs(m.y1 - m.y0);
+          ctx.fillStyle = 'rgba(0,229,255,0.08)'; ctx.fillRect(x, y, w, h);
+          ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(0,229,255,0.9)'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+        }
+      }
+    };
+
+    let last = performance.now();
+    const tick = () => {
+      const t = performance.now();
+      const dt = Math.min(0.05, (t - last) / 1000); last = t;
+      this.sim.ft.push(t); while (this.sim.ft.length > 24) this.sim.ft.shift();
+      if (this.sim.ft.length > 1) this.sim.fps = 1000 * (this.sim.ft.length - 1) / (this.sim.ft[this.sim.ft.length - 1] - this.sim.ft[0]);
+      if (this.state.streaming) update(dt, t);
+      draw(t);
+      this.renderProjectorTargets();
+    };
+    this._tick = setInterval(tick, 22);
+
+    // pointer interaction
+    let dragging = false, lx = 0, ly = 0;
+    const warpInteractive = () => this.state.tool === 'warp' || this.state.rightTab === 'warp';
+    if (!this.warpSel) this.warpSel = [];
+    this.warpMarquee = null;
+    let wi = null;
+    const HIT2 = 169;
+    const findCorner = (mx, my) => {
+      const c = this.sim.warp.corners; let best = -1, bd = HIT2;
+      for (let i = 0; i < 4; i++) { const [sx, sy] = this._wts(c[i][0], c[i][1]); const d = (sx - mx) * (sx - mx) + (sy - my) * (sy - my); if (d < bd) { bd = d; best = i; } }
+      return best;
+    };
+    const findBBoxHandle = (mx, my) => {
+      if (!this._bboxHandles) return -1;
+      for (let i = 0; i < this._bboxHandles.length; i++) { const h = this._bboxHandles[i]; if ((h.sx - mx) * (h.sx - mx) + (h.sy - my) * (h.sy - my) < 110) return i; }
+      return -1;
+    };
+    const syncSel = () => this.setState({ warpSelCount: this.warpSel.length });
+    const onMove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const [wx, wy] = stw(mx, my);
+      if (this.coordRef && this.coordRef.current) this.coordRef.current.textContent = 'x ' + wx.toFixed(2) + '  y ' + wy.toFixed(2);
+      if (wi) {
+        if ((wi.mode === 'move' || wi.mode === 'scale') && !wi.pushed && wi.pre) { this._pushHistory(wi.pre); wi.pushed = true; }
+        if (wi.mode === 'move') {
+          let dx = wx - wi.startW[0], dy = wy - wi.startW[1];
+          if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
+          wi.sel.forEach((idx, k) => { this.sim.warp.corners[idx] = [wi.snap[k][0] + dx, wi.snap[k][1] + dy]; });
+          this.recomputeWarp(); this._mirrorWarp();
+        } else if (wi.mode === 'scale') {
+          const ax = wi.anchor[0], ay = wi.anchor[1], spanx = wi.h0[0] - ax, spany = wi.h0[1] - ay;
+          let sx = Math.abs(spanx) > 1e-4 ? (wx - ax) / spanx : 1;
+          let sy = Math.abs(spany) > 1e-4 ? (wy - ay) / spany : 1;
+          if (e.shiftKey) { const both = Math.abs(spanx) > 1e-4 && Math.abs(spany) > 1e-4; const f = both ? (sx + sy) / 2 : (Math.abs(spanx) > 1e-4 ? sx : sy); if (Math.abs(spanx) > 1e-4) sx = f; if (Math.abs(spany) > 1e-4) sy = f; }
+          wi.sel.forEach((idx, k) => { this.sim.warp.corners[idx] = [ax + (wi.snap[k][0] - ax) * sx, ay + (wi.snap[k][1] - ay) * sy]; });
+          this.recomputeWarp(); this._mirrorWarp();
+        } else if (wi.mode === 'marquee') {
+          this.warpMarquee = { x0: wi.mStart[0], y0: wi.mStart[1], x1: mx, y1: my };
+        }
+        return;
+      }
+      if (dragging) { this.view.panX += e.clientX - lx; this.view.panY += e.clientY - ly; lx = e.clientX; ly = e.clientY; }
+    };
+    const onDown = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      if (warpInteractive()) {
+        const hb = findBBoxHandle(mx, my);
+        if (hb >= 0 && this.warpSel.length >= 2) {
+          const hbh = this._bboxHandles[hb];
+          wi = { mode: 'scale', sel: this.warpSel.slice(), snap: this.warpSel.map(i => this.sim.warp.corners[i].slice()), anchor: hbh.aw, h0: hbh.cw, pre: this._snapCorners(), pushed: false };
+          canvas.style.cursor = 'nwse-resize'; return;
+        }
+        const ci = findCorner(mx, my);
+        if (ci >= 0) {
+          if (this.warpSel.indexOf(ci) < 0) { this.warpSel = [ci]; syncSel(); }
+          const [wx, wy] = stw(mx, my);
+          wi = { mode: 'move', sel: this.warpSel.slice(), snap: this.warpSel.map(i => this.sim.warp.corners[i].slice()), startW: [wx, wy], pre: this._snapCorners(), pushed: false };
+          canvas.style.cursor = 'grabbing'; return;
+        }
+        wi = { mode: 'marquee', mStart: [mx, my] };
+        this.warpMarquee = { x0: mx, y0: my, x1: mx, y1: my };
+        return;
+      }
+      if (this.state.tool === 'select') { dragging = true; lx = e.clientX; ly = e.clientY; canvas.style.cursor = 'grabbing'; }
+    };
+    const onUp = () => {
+      if (wi && wi.mode === 'marquee' && this.warpMarquee) {
+        const m = this.warpMarquee, x0 = Math.min(m.x0, m.x1), x1 = Math.max(m.x0, m.x1), y0 = Math.min(m.y0, m.y1), y1 = Math.max(m.y0, m.y1);
+        const moved = Math.abs(m.x1 - m.x0) > 4 || Math.abs(m.y1 - m.y0) > 4;
+        if (moved) {
+          const sel = [], c = this.sim.warp.corners;
+          for (let i = 0; i < 4; i++) { const [sx, sy] = this._wts(c[i][0], c[i][1]); if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) sel.push(i); }
+          this.warpSel = sel; syncSel();
+        } else { this.warpSel = []; syncSel(); }
+      }
+      this.warpMarquee = null; wi = null; dragging = false;
+      canvas.style.cursor = this.state.tool === 'draw' ? 'crosshair' : (warpInteractive() ? 'default' : 'grab');
+    };
+    const onClick = (e) => {
+      if (this.state.tool !== 'draw') return;
+      const rect = canvas.getBoundingClientRect();
+      const [wx, wy] = stw(e.clientX - rect.left, e.clientY - rect.top);
+      this.sim.draft.push([wx, wy]); this.setState({ draftCount: this.sim.draft.length });
+    };
+    const onWheel = (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const [bx, by] = stw(mx, my);
+      const nz = Math.max(0.5, Math.min(3.2, this.view.z * (e.deltaY < 0 ? 1.12 : 0.89)));
+      this.view.z = nz;
+      const s = scale();
+      this.view.panX = mx - this.W / 2 - (bx - WC.x) * s;
+      this.view.panY = my - this.H / 2 + (by - WC.y) * s;
+    };
+    canvas.style.cursor = 'grab';
+    canvas.addEventListener('mousemove', onMove);
+    canvas.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
+    canvas.addEventListener('click', onClick);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    const onKey = (e) => {
+      if (!this.state.projectorOpen) return;
+      const k = (e.key || '').toLowerCase();
+      if (k === 'h') this.setState(s => ({ projChrome: !s.projChrome }));
+      else if (k === 'g') this.setState(s => ({ projGrid: !s.projGrid }));
+      else if (k === 'l') this.setState(s => ({ projLabels: !s.projLabels }));
+      else if (k === 't') this.setState(s => ({ projTest: !s.projTest }));
+      else if (k === 'f') this.projFullscreen();
+      else if (k === 'escape' && !document.fullscreenElement) this.closeProjector();
+    };
+    window.addEventListener('keydown', onKey);
+    const onKeyDoc = (e) => {
+      const k = (e.key || '').toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) this.redoWarp(); else this.undoWarp(); }
+      else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); this.redoWarp(); }
+    };
+    window.addEventListener('keydown', onKeyDoc);
+    this._cleanupEvents = () => {
+      canvas.removeEventListener('mousemove', onMove); canvas.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mouseup', onUp); canvas.removeEventListener('click', onClick); canvas.removeEventListener('wheel', onWheel);
+      window.removeEventListener('keydown', onKey); window.removeEventListener('keydown', onKeyDoc);
+    };
+
+    // UI sync
+    let lc = 0;
+    this._sync = setInterval(() => {
+      if (!this.state.streaming) return;
+      const zonesSim = this.sim.zones;
+      const objs = blobs.map(b => {
+        const v = Math.hypot(b.vx, b.vy);
+        let zone = '\u2014';
+        for (const z of zonesSim) { if (z.visible && pip(b.x, b.y, z.pts)) zone = z.name; }
+        const n = this.normPt(b.x, b.y);
+        const inside = n[0] >= 0 && n[0] <= 1 && n[1] >= 0 && n[1] <= 1;
+        return { id: b.id, x: b.x.toFixed(2), y: b.y.toFixed(2), v: v.toFixed(2), zone, color: b.color, zoneColor: zone === '\u2014' ? '#5b636d' : '#00e5ff', u: n[0], w: n[1], uStr: n[0].toFixed(3), vStr: n[1].toFixed(3), inside };
+      });
+      const add = [];
+      const slug = (n) => n.replace(/\s+/g, '_').toLowerCase();
+      for (const z of zonesSim) {
+        const occ = blobs.some(b => pip(b.x, b.y, z.pts));
+        if (occ !== z.occupied) { z.occupied = occ; add.push({ text: '/lidar/zone/' + slug(z.name) + '  ' + (occ ? 1 : 0), color: '#00e5ff' }); }
+      }
+      lc++;
+      if (lc % 2 === 0) {
+        const o = objs[lc % objs.length];
+        const we = this.sim.warp.enabled, px = we ? o.uStr : o.x, py = we ? o.vStr : o.y;
+        if (this.state.protocol === 'osc') add.push({ text: '/lidar/trk/' + o.id + '  ' + px + '  ' + py + '  ' + o.v, color: '#7c8893' });
+        else add.push({ text: '/tuio/2Dobj set ' + o.id + ' ' + o.id + ' ' + px + ' ' + py + ' 0.0', color: '#7c8893' });
+      }
+      let log = this.state.oscLog.concat(add); if (log.length > 60) log = log.slice(log.length - 60);
+      let rt = this.state.recordTime; if (this.state.recording) rt += 0.12;
+      const zonesUI = zonesSim.map(z => ({ name: z.name, visible: z.visible, occupied: z.occupied, count: z.pts.length }));
+      this.setState({ objects: objs, oscLog: log, recordTime: rt, fps: Math.round(this.sim.fps), pointCount: this.sim.points.filter(p => p.hit).length, latency: (8 + Math.random() * 5).toFixed(1), zones: zonesUI });
+    }, 120);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this._tick);
+    clearInterval(this._sync);
+    if (this._ro) this._ro.disconnect();
+    if (this._cleanupEvents) this._cleanupEvents();
+    if (this.projWin && !this.projWin.closed) this.projWin.close();
+  }
+
+  selectSensor(id) { this.ensureCfgs(); const cfg = this.cfgs[id] || {}; this.setState(Object.assign({ selectedSensor: id, calX: '0.00', calY: '0.00', calRot: '0.0' }, cfg)); }
+  setCfg(key, val) { this.ensureCfgs(); const id = this.state.selectedSensor; if (this.cfgs[id]) this.cfgs[id][key] = val; this.setState({ [key]: val }); }
+  captureBackground() {
+    if (!this.sim || !this._castWalls) return;
+    const RAYS = this.RAYS, step = 2 * Math.PI / RAYS, bg = new Array(RAYS);
+    for (let i = 0; i < RAYS; i++) { const d = this._castWalls(i * step); bg[i] = (d && isFinite(d)) ? d : this.RANGE; }
+    this.sim.bg = bg;
+    this.setState({ bgCaptured: true, bgSubtract: true });
+  }
+  clearBackground() { if (this.sim) this.sim.bg = null; this.setState({ bgCaptured: false, bgSubtract: false }); }
+  toggleBgSubtract() { if (!this.state.bgCaptured) return; this.setState(s => ({ bgSubtract: !s.bgSubtract })); }
+  setTool(t) {
+    if (t === 'draw') { if (this.sim) this.sim.draft = []; this.setState({ tool: 'draw', drafting: true, draftCount: 0, rightTab: 'zones' }); }
+    else if (t === 'warp') { this.setState({ tool: 'warp', drafting: false, rightTab: 'warp' }); }
+    else this.setState({ tool: t, drafting: false });
+  }
+  solve8(A, b) {
+    const n = b.length, M = A.map((r, i) => r.concat([b[i]]));
+    for (let col = 0; col < n; col++) {
+      let piv = col;
+      for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+      const tmp = M[col]; M[col] = M[piv]; M[piv] = tmp;
+      const d = M[col][col]; if (Math.abs(d) < 1e-12) return null;
+      for (let r = 0; r < n; r++) { if (r === col) continue; const f = M[r][col] / d; for (let cc = col; cc <= n; cc++) M[r][cc] -= f * M[col][cc]; }
+    }
+    return M.map((r, i) => r[n] / M[i][i]);
+  }
+  computeH(src, dst) {
+    const A = [], b = [];
+    for (let i = 0; i < 4; i++) {
+      const x = src[i][0], y = src[i][1], u = dst[i][0], v = dst[i][1];
+      A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+      A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+    }
+    return this.solve8(A, b);
+  }
+  recomputeWarp() {
+    if (!this.sim || !this.sim.warp) return;
+    const c = this.sim.warp.corners, unit = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    const f = this.computeH(c, unit), inv = this.computeH(unit, c);
+    if (f && f.every(Number.isFinite)) this.sim.warp.Hfwd = f;
+    if (inv && inv.every(Number.isFinite)) this.sim.warp.Hinv = inv;
+  }
+  normPt(x, y) {
+    if (!this.sim || !this.sim.warp.Hfwd) return [0, 0];
+    const h = this.sim.warp.Hfwd, d = h[6] * x + h[7] * y + 1;
+    return [(h[0] * x + h[1] * y + h[2]) / d, (h[3] * x + h[4] * y + h[5]) / d];
+  }
+  _mirrorWarp() { if (this.sim) this.setState({ warpCorners: this.sim.warp.corners.map(c => [c[0], c[1]]) }); }
+  toggleWarp() { if (!this.sim) return; this.sim.warp.enabled = !this.sim.warp.enabled; this.setState({ warpEnabled: this.sim.warp.enabled }); }
+  setWarpCorner(i, axis, val) { if (!this.sim) return; const v = parseFloat(val); if (isNaN(v)) return; this._pushHistory(); this.sim.warp.corners[i][axis] = v; this.recomputeWarp(); this._mirrorWarp(); }
+  resetWarp() { if (!this.sim) return; this._pushHistory(); this.sim.warp.corners = [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]]; this.recomputeWarp(); this._mirrorWarp(); }
+  _snapCorners() { return this.sim.warp.corners.map(p => p.slice()); }
+  _pushHistory(snap) { this.warpHistory = this.warpHistory || []; this.warpHistory.push(snap || this._snapCorners()); if (this.warpHistory.length > 80) this.warpHistory.shift(); this.warpFuture = []; this._syncHist(); }
+  _restoreCorners(arr) { this.sim.warp.corners = arr.map(p => p.slice()); this.recomputeWarp(); this._mirrorWarp(); }
+  undoWarp() { if (!this.sim || !(this.warpHistory && this.warpHistory.length)) return; (this.warpFuture = this.warpFuture || []).push(this._snapCorners()); this._restoreCorners(this.warpHistory.pop()); this._syncHist(); }
+  redoWarp() { if (!this.sim || !(this.warpFuture && this.warpFuture.length)) return; (this.warpHistory = this.warpHistory || []).push(this._snapCorners()); this._restoreCorners(this.warpFuture.pop()); this._syncHist(); }
+  _syncHist() { this.setState({ canUndo: (this.warpHistory || []).length > 0, canRedo: (this.warpFuture || []).length > 0 }); }
+  _warpCentroid() { const c = this.sim.warp.corners; return [(c[0][0] + c[1][0] + c[2][0] + c[3][0]) / 4, (c[0][1] + c[1][1] + c[2][1] + c[3][1]) / 4]; }
+  _afterWarp() { this.recomputeWarp(); this._mirrorWarp(); }
+  warpTranslate(dx, dy) { if (!this.sim) return; for (const p of this.sim.warp.corners) { p[0] += dx; p[1] += dy; } this._afterWarp(); }
+  warpScale(f) { if (!this.sim) return; const c = this._warpCentroid(); for (const p of this.sim.warp.corners) { p[0] = c[0] + (p[0] - c[0]) * f; p[1] = c[1] + (p[1] - c[1]) * f; } this._afterWarp(); }
+  warpRotate(deg) { if (!this.sim || !deg) return; this._pushHistory(); const c = this._warpCentroid(), a = deg * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a); for (const p of this.sim.warp.corners) { const x = p[0] - c[0], y = p[1] - c[1]; p[0] = c[0] + x * cs - y * sn; p[1] = c[1] + x * sn + y * cs; } this._afterWarp(); }
+  warpFlip(axis) { if (!this.sim) return; this._pushHistory(); const c = this._warpCentroid(); for (const p of this.sim.warp.corners) { if (axis === 'h') p[0] = 2 * c[0] - p[0]; else p[1] = 2 * c[1] - p[1]; } this._afterWarp(); }
+  cycleWarpStep() { const steps = [0.05, 0.1, 0.25, 0.5]; const i = steps.indexOf(this.state.warpStep); this.setState({ warpStep: steps[(i + 1) % steps.length] }); }
+  selectAllCorners() { this.warpSel = [0, 1, 2, 3]; this.setState({ warpSelCount: 4 }); }
+  clearCornerSel() { this.warpSel = []; this.setState({ warpSelCount: 0 }); }
+  _spawnProjector(features) {
+    if (this.projWin && !this.projWin.closed) { this.projWin.focus(); return; }
+    let w = null;
+    try { w = window.open('', 'lidar_projector', features); } catch (e) { w = null; }
+    if (w && w.document) {
+      const d = w.document;
+      d.title = 'LiDAR Bridge \u2014 Projector Output';
+      d.documentElement.style.background = '#000';
+      d.body.style.cssText = 'margin:0;background:#000;overflow:hidden;cursor:none';
+      d.body.innerHTML = '<canvas id="pcv" style="position:fixed;inset:0;width:100vw;height:100vh;display:block;background:#000"></canvas>';
+      this.projWin = w;
+      this.setState({ projWinOpen: true });
+    } else {
+      this.projWin = null;
+      this.setState({ projectorOpen: true });
+    }
+  }
+  openProjector() { this._spawnProjector('width=1280,height=720'); }
+  openProjectorExtended() { const sw = (window.screen && window.screen.availWidth) || 1440; this._spawnProjector('left=' + sw + ',top=0,width=1280,height=720'); }
+  toggleNdi() { this.setState(s => ({ ndiOn: !s.ndiOn })); }
+  setNdiRes(w, h) { this.setState({ ndiW: String(w), ndiH: String(h) }); }
+  setOutputMode(m) { this.setState({ outputMode: m }); }
+  openOutput() { const m = this.state.outputMode; if (m === 'ndi') this.toggleNdi(); else if (m === 'extended') this.openProjectorExtended(); else this.openProjector(); }
+  focusProjector() { if (this.projWin && !this.projWin.closed) this.projWin.focus(); }
+  closeProjectorWindow() { if (this.projWin && !this.projWin.closed) this.projWin.close(); this.projWin = null; this.setState({ projWinOpen: false }); }
+  closeProjector() { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); this.setState({ projectorOpen: false }); }
+  projFullscreen() { const el = this.projWrapRef.current; if (!el) return; if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); }
+  _sizeCtx(cv, cw, ch) {
+    if (!cv || !cw || !ch) return null;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (cv._cw !== cw || cv._ch !== ch) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); cv._cw = cw; cv._ch = ch; }
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return ctx;
+  }
+  renderProjectorTargets() {
+    const st = this.state, flags = { grid: st.projGrid, labels: st.projLabels, test: st.projTest, bright: st.projBright };
+    const mc = this.monitorCanvasRef && this.monitorCanvasRef.current;
+    if (mc && mc.parentElement) { const ctx = this._sizeCtx(mc, mc.parentElement.clientWidth, mc.parentElement.clientHeight); if (ctx) this.renderProjector(ctx, mc._cw, mc._ch, { grid: true, labels: true, test: false, bright: 1 }); }
+    if (this.projWin) {
+      if (this.projWin.closed) { this.projWin = null; if (st.projWinOpen) this.setState({ projWinOpen: false }); }
+      else { const pc = this.projWin.document.getElementById('pcv'); if (pc) { const ctx = this._sizeCtx(pc, this.projWin.innerWidth, this.projWin.innerHeight); if (ctx) this.renderProjector(ctx, pc._cw, pc._ch, flags); } }
+    }
+    if (st.projectorOpen) { const oc = this.projCanvasRef && this.projCanvasRef.current, w = this.projWrapRef && this.projWrapRef.current; if (oc && w) { const ctx = this._sizeCtx(oc, w.clientWidth, w.clientHeight); if (ctx) this.renderProjector(ctx, oc._cw, oc._ch, flags); } }
+  }
+  renderProjector(ctx, W, H, flags) {
+    const st = this.state, mn = Math.min(W, H);
+    ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    const U = (u, v) => [u * W, v * H];
+    if (flags.test) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, H); ctx.moveTo(W, 0); ctx.lineTo(0, H); ctx.stroke();
+      for (let r = mn * 0.08; r < mn * 0.62; r += mn * 0.08) { ctx.beginPath(); ctx.arc(W / 2, H / 2, r, 0, 2 * Math.PI); ctx.stroke(); }
+    }
+    if (flags.grid) {
+      for (let i = 0; i <= 10; i++) {
+        const p = i / 10, major = (i % 5 === 0);
+        ctx.strokeStyle = major ? 'rgba(0,229,255,0.5)' : 'rgba(0,229,255,0.15)'; ctx.lineWidth = major ? 1.4 : 1;
+        ctx.beginPath(); ctx.moveTo(p * W, 0); ctx.lineTo(p * W, H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, p * H); ctx.lineTo(W, p * H); ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = 'rgba(0,229,255,0.95)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+    const bl = mn * 0.06, corners = [[0, 0], [1, 0], [1, 1], [0, 1]], labs = ['0,0', '1,0', '1,1', '0,1'];
+    corners.forEach((c, i) => {
+      const [px, py] = U(c[0], c[1]), dx = c[0] === 0 ? 1 : -1, dy = c[1] === 0 ? 1 : -1;
+      ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + dx * bl, py); ctx.moveTo(px, py); ctx.lineTo(px, py + dy * bl); ctx.stroke();
+      const tx = px + dx * bl * 1.5, ty = py + dy * bl * 1.5;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(tx, ty, bl * 0.4, 0, 2 * Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tx - bl * 0.6, ty); ctx.lineTo(tx + bl * 0.6, ty); ctx.moveTo(tx, ty - bl * 0.6); ctx.lineTo(tx, ty + bl * 0.6); ctx.stroke();
+      if (flags.labels) { ctx.fillStyle = '#7eeaf6'; ctx.font = '600 ' + Math.round(mn * 0.02) + "px 'IBM Plex Mono', monospace"; ctx.textAlign = c[0] === 0 ? 'left' : 'right'; ctx.textBaseline = c[1] === 0 ? 'top' : 'bottom'; ctx.fillText('(' + labs[i] + ')', px + dx * bl * 0.5, py + dy * bl * 0.45); }
+    });
+    const cx = W / 2, cy = H / 2, cs = mn * 0.04;
+    ctx.strokeStyle = 'rgba(0,229,255,0.55)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(cx - cs, cy); ctx.lineTo(cx + cs, cy); ctx.moveTo(cx, cy - cs); ctx.lineTo(cx, cy + cs); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, cs * 0.55, 0, 2 * Math.PI); ctx.stroke();
+    if (this.sim) for (const z of this.sim.zones) {
+      if (!z.visible) continue;
+      ctx.beginPath(); z.pts.forEach((p, i) => { const n = this.normPt(p[0], p[1]); const [sx, sy] = U(n[0], n[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath();
+      ctx.fillStyle = z.occupied ? 'rgba(0,229,255,0.16)' : 'rgba(0,229,255,0.05)'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = z.occupied ? 'rgba(0,229,255,0.95)' : 'rgba(0,229,255,0.45)'; ctx.stroke();
+      if (flags.labels) { const ctr = z.pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]).map(v => v / z.pts.length); const n = this.normPt(ctr[0], ctr[1]); const [lx, ly] = U(n[0], n[1]); ctx.fillStyle = z.occupied ? '#bff3fb' : 'rgba(0,229,255,0.6)'; ctx.font = '600 ' + Math.round(mn * 0.018) + "px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(z.name.toUpperCase(), lx, ly); }
+    }
+    if (this.sim) for (const b of this.sim.blobs) {
+      const n = this.normPt(b.x, b.y), u = n[0], v = n[1];
+      if (u < -0.06 || u > 1.06 || v < -0.06 || v > 1.06) continue;
+      const [sx, sy] = U(u, v), rr = mn * 0.022;
+      ctx.strokeStyle = b.color + '55'; ctx.lineWidth = 2; ctx.beginPath();
+      b.hist.forEach((hp, i) => { const hn = this.normPt(hp[0], hp[1]); const [hx, hy] = U(hn[0], hn[1]); i ? ctx.lineTo(hx, hy) : ctx.moveTo(hx, hy); }); ctx.stroke();
+      ctx.beginPath(); ctx.arc(sx, sy, rr * 1.9, 0, 2 * Math.PI); ctx.fillStyle = b.color + '22'; ctx.fill();
+      ctx.beginPath(); ctx.arc(sx, sy, rr, 0, 2 * Math.PI); ctx.strokeStyle = b.color; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(sx, sy, 4, 0, 2 * Math.PI); ctx.fillStyle = b.color; ctx.shadowColor = b.color; ctx.shadowBlur = 14; ctx.fill(); ctx.shadowBlur = 0;
+      if (flags.labels) { ctx.fillStyle = b.color; ctx.font = '600 ' + Math.round(mn * 0.016) + "px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(b.id + '  ' + u.toFixed(2) + ',' + v.toFixed(2), sx, sy - rr * 2); }
+    }
+    if (flags.bright < 1) { ctx.fillStyle = 'rgba(0,0,0,' + (1 - flags.bright) + ')'; ctx.fillRect(0, 0, W, H); }
+  }
+  finishZone() {
+    if (this.sim && this.sim.draft.length >= 3) {
+      const n = this.sim.zones.length + 1;
+      this.sim.zones.push({ name: 'Zone ' + n, pts: this.sim.draft.slice(), visible: true, occupied: false });
+      this.sim.draft = [];
+      this.setState({ tool: 'select', drafting: false, draftCount: 0, zones: this.sim.zones.map(z => ({ name: z.name, visible: z.visible, occupied: z.occupied, count: z.pts.length })) });
+    }
+  }
+  cancelDraft() { if (this.sim) this.sim.draft = []; this.setState({ tool: 'select', drafting: false, draftCount: 0 }); }
+  toggleZone(i) { if (!this.sim) return; this.sim.zones[i].visible = !this.sim.zones[i].visible; this.setState({ zones: this.sim.zones.map(z => ({ name: z.name, visible: z.visible, occupied: z.occupied, count: z.pts.length })) }); }
+  toggleRecord() {
+    if (this.state.recording) {
+      const secs = Math.floor(this.state.recordTime);
+      const dur = String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0');
+      const takes = this.state.takes.concat([{ name: 'Take ' + String(this.state.takes.length + 1).padStart(2, '0'), dur }]);
+      this.setState({ recording: false, recordTime: 0, takes });
+    } else this.setState({ recording: true, recordTime: 0 });
+  }
+
+  renderVals() {
+    const st = this.state;
+    const sel = this.SENSORS.find(s => s.id === st.selectedSensor) || this.SENSORS[0];
+    const cfgs = this.ensureCfgs();
+    const sensorRows = this.SENSORS.map(s => {
+      const isSel = s.id === st.selectedSensor;
+      const off = s.status === 'offline';
+      const cf = cfgs[s.id] || s.cfg;
+      return {
+        id: s.id, name: s.name, range: s.range, hz: s.hz, sel: isSel,
+        conn: cf.connType === 'serial' ? 'SERIAL' : 'NET',
+        addr: cf.connType === 'serial' ? cf.comPort : cf.ipAddr,
+        onSelect: () => this.selectSensor(s.id),
+        dot: off ? '#ff4d5e' : '#39ff7a',
+        border: isSel ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)',
+        bg: isSel ? 'rgba(0,229,255,0.06)' : '#10141a',
+        nameColor: off ? '#717a84' : '#dbe1e8'
+      };
+    });
+    const seg = (a) => ({ bg: a ? 'rgba(0,229,255,0.14)' : '#13171c', bd: a ? 'rgba(0,229,255,0.45)' : 'rgba(255,255,255,0.1)', col: a ? '#9fe4ef' : '#9aa3ad' });
+    const h = React.createElement;
+    const mk = (kids) => h('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none' }, kids.map((k, i) => React.cloneElement(k, { key: i })));
+    const icon = {
+      select: mk([h('path', { d: 'M3 2l9 5-4 1.2L6.4 13 3 2z', fill: 'currentColor' })]),
+      draw: mk([h('rect', { x: 2.5, y: 2.5, width: 11, height: 11, rx: 1, stroke: 'currentColor', strokeWidth: 1.4, strokeDasharray: '2.6 2' }), h('circle', { cx: 2.5, cy: 2.5, r: 1.6, fill: 'currentColor' }), h('circle', { cx: 13.5, cy: 13.5, r: 1.6, fill: 'currentColor' })]),
+      calibrate: mk([h('circle', { cx: 8, cy: 8, r: 5.5, stroke: 'currentColor', strokeWidth: 1.3 }), h('path', { d: 'M8 1v3M8 12v3M1 8h3M12 8h3', stroke: 'currentColor', strokeWidth: 1.3 }), h('circle', { cx: 8, cy: 8, r: 1.4, fill: 'currentColor' })]),
+      measure: mk([h('rect', { x: 1.5, y: 5, width: 13, height: 6, rx: 1, stroke: 'currentColor', strokeWidth: 1.3 }), h('path', { d: 'M5 5v2.4M8 5v3M11 5v2.4', stroke: 'currentColor', strokeWidth: 1.2 })]),
+      warp: mk([h('path', { d: 'M2 4 L14 2.5 L12.5 14 L3.5 12 Z', stroke: 'currentColor', strokeWidth: 1.3, fill: 'none', strokeLinejoin: 'round' }), h('circle', { cx: 2, cy: 4, r: 1.5, fill: 'currentColor' }), h('circle', { cx: 14, cy: 2.5, r: 1.5, fill: 'currentColor' }), h('circle', { cx: 12.5, cy: 14, r: 1.5, fill: 'currentColor' }), h('circle', { cx: 3.5, cy: 12, r: 1.5, fill: 'currentColor' })])
+    };
+    const tool = (t, label) => ({
+      label, icon: icon[t], onClick: () => this.setTool(t),
+      border: st.tool === t ? 'rgba(0,229,255,0.5)' : 'transparent',
+      bg: st.tool === t ? 'rgba(0,229,255,0.14)' : 'transparent',
+      color: st.tool === t ? '#00e5ff' : '#9aa3ad'
+    });
+    const toolRows = [tool('select', 'Select / Pan'), tool('draw', 'Draw Zone'), tool('warp', 'Warp / Corner-pin'), tool('calibrate', 'Calibrate'), tool('measure', 'Measure')];
+
+    const tab = (k, label) => ({
+      label, active: st.rightTab === k, onClick: () => this.setState({ rightTab: k }),
+      bg: st.rightTab === k ? 'rgba(255,255,255,0.05)' : 'transparent',
+      color: st.rightTab === k ? '#e8ecf1' : '#717a84'
+    });
+    const tabRows = [tab('tracking', 'TRACK'), tab('zones', 'ZONES'), tab('warp', 'WARP'), tab('output', 'OUTPUT')];
+
+    const zoneRows = st.zones.map((z, i) => ({
+      name: z.name, count: z.count, slug: z.name.replace(/\s+/g, '_').toLowerCase(),
+      onToggle: () => this.toggleZone(i),
+      eye: z.visible ? '\u25C9' : '\u25CB',
+      eyeBg: z.visible ? 'rgba(0,229,255,0.12)' : 'transparent',
+      eyeColor: z.visible ? '#00e5ff' : '#5b636d',
+      border: z.occupied ? 'rgba(0,229,255,0.35)' : 'rgba(255,255,255,0.06)',
+      status: z.occupied ? 'TRIGGERED' : 'IDLE',
+      badgeBg: z.occupied ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.05)',
+      badgeColor: z.occupied ? '#7eeaf6' : '#717a84'
+    }));
+
+    const addr = st.protocol === 'osc'
+      ? (st.warpEnabled ? '/lidar/trk/{id}  u  v  vel   · 0–1' : '/lidar/trk/{id}  x  y  vel   · meters')
+      : (st.warpEnabled ? '/tuio/2Dobj set {sid} {id} u v angle' : '/tuio/2Dobj set {sid} {id} x y angle');
+
+    const objects = st.objects.map(o => ({ ...o, zoneColor: o.zone === '\u2014' ? '#5b636d' : '#00e5ff' }));
+
+    const cornerMeta = [['TL', '0,0'], ['TR', '1,0'], ['BR', '1,1'], ['BL', '0,1']];
+    const wc = st.warpCorners || [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]];
+    const warpCornerRows = cornerMeta.map((m, i) => ({
+      tag: m[0], norm: m[1],
+      x: (wc[i] ? wc[i][0] : 0).toFixed(2), y: (wc[i] ? wc[i][1] : 0).toFixed(2),
+      onX: (e) => this.setWarpCorner(i, 0, e.target.value),
+      onY: (e) => this.setWarpCorner(i, 1, e.target.value)
+    }));
+    const warpObjects = (st.objects || []).map(o => ({
+      id: o.id, color: o.color,
+      u: o.uStr !== undefined ? o.uStr : '—', v: o.vStr !== undefined ? o.vStr : '—',
+      valColor: o.inside ? '#cdd4dc' : '#5b636d',
+      tag: o.uStr === undefined ? '' : (o.inside ? 'IN' : 'OUT'),
+      tagColor: o.inside ? '#39ff7a' : '#5b636d'
+    }));
+    const clampD = (t) => Math.max(-0.08, Math.min(1.08, t));
+    const gl = [];
+    for (let i = 0; i <= 4; i++) {
+      const p = i / 4;
+      gl.push(h('div', { key: 'gv' + i, style: { position: 'absolute', left: (12 + p * 76) + '%', top: '14%', bottom: '14%', width: '1px', background: 'rgba(0,229,255,0.16)' } }));
+      gl.push(h('div', { key: 'gh' + i, style: { position: 'absolute', top: (14 + p * 72) + '%', left: '12%', right: '12%', height: '1px', background: 'rgba(0,229,255,0.16)' } }));
+    }
+    const cTags = [
+      { t: '0,0', s: { left: '12%', top: '2%' } }, { t: '1,0', s: { left: '88%', top: '2%' } },
+      { t: '1,1', s: { left: '88%', bottom: '2%' } }, { t: '0,1', s: { left: '12%', bottom: '2%' } }
+    ].map((cc, i) => h('div', { key: 'ctg' + i, style: Object.assign({ position: 'absolute', font: "600 9px 'IBM Plex Mono', monospace", color: '#5b7e86', transform: 'translateX(-50%)' }, cc.s) }, cc.t));
+    const uDots = (st.objects || []).filter(o => o.u !== undefined).map(o => h('div', { key: 'ud' + o.id, style: { position: 'absolute', left: (12 + clampD(o.u) * 76) + '%', top: (14 + clampD(o.w) * 72) + '%', width: '11px', height: '11px', marginLeft: '-5.5px', marginTop: '-5.5px', borderRadius: '50%', background: o.color, boxShadow: '0 0 7px ' + o.color, opacity: o.inside ? 1 : 0.3, border: '1px solid rgba(255,255,255,0.45)' } }));
+    const warpPreview = h('div', { style: { position: 'relative', width: '100%', height: '150px', background: '#08090b', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', overflow: 'hidden' } }, [].concat(gl, cTags, uDots));
+    const we = st.warpEnabled;
+
+    const secs = Math.floor(st.recordTime);
+    const recTimeStr = String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0') + '.' + String(Math.floor((st.recordTime % 1) * 100)).padStart(2, '0');
+
+    return {
+      streaming: st.streaming, paused: !st.streaming,
+      streamLabel: st.streaming ? 'STREAMING' : 'PAUSED',
+      toggleStream: () => this.setState({ streaming: !st.streaming }),
+      fps: st.fps, pointCount: st.pointCount, latency: st.latency,
+      outProtoUpper: st.protocol.toUpperCase(), host: st.host, port: st.port,
+      goOutput: () => this.setState({ rightTab: 'output' }),
+      toggleRecord: () => this.toggleRecord(),
+      recBtnLabel: st.recording ? 'REC ' + recTimeStr : 'RECORD',
+      recLongLabel: st.recording ? 'STOP' : 'RECORD',
+      recRingBorder: st.recording ? 'rgba(255,77,94,0.7)' : 'rgba(255,77,94,0.3)',
+      recRingBg: st.recording ? 'rgba(255,77,94,0.16)' : 'rgba(255,77,94,0.07)',
+      recDotRadius: st.recording ? '2px' : '50%',
+      recTimeColor: st.recording ? '#ff8088' : '#5b636d',
+      recTimeStr, playWidth: st.recording ? Math.min(100, (st.recordTime / 30) * 100) + '%' : '0%',
+
+      onlineCount: this.SENSORS.filter(s => s.status === 'online').length,
+      sensorRows,
+      selName: sel.name, selRange: sel.range, selFov: '360°',
+      calX: st.calX, calY: st.calY, calRot: st.calRot,
+      onCalX: (e) => this.setState({ calX: e.target.value }),
+      onCalY: (e) => this.setState({ calY: e.target.value }),
+      onCalRot: (e) => this.setState({ calRot: e.target.value }),
+
+      connType: st.connType, isSerial: st.connType === 'serial', isNetwork: st.connType === 'network',
+      comPort: st.comPort, baudrate: st.baudrate, ipAddr: st.ipAddr, ipPort: st.ipPort,
+      netProto: st.netProto, scanMode: st.scanMode, precision: st.precision,
+      quality: st.quality, distMin: st.distMin, distMax: st.distMax, coordSys: st.coordSys,
+      samplesLabel: (360 * (parseInt(st.precision) || 2)) + ' samples / scan',
+      setSerial: () => this.setCfg('connType', 'serial'), setNetwork: () => this.setCfg('connType', 'network'),
+      onPort: (e) => this.setCfg('comPort', e.target.value), onBaud: (e) => this.setCfg('baudrate', e.target.value),
+      onIp: (e) => this.setCfg('ipAddr', e.target.value), onIpPort: (e) => this.setCfg('ipPort', e.target.value),
+      setTcp: () => this.setCfg('netProto', 'tcp'), setUdp: () => this.setCfg('netProto', 'udp'),
+      setScanStd: () => this.setCfg('scanMode', 'standard'), setScanExp: () => this.setCfg('scanMode', 'express'),
+      setP1: () => this.setCfg('precision', '1'), setP2: () => this.setCfg('precision', '2'), setP3: () => this.setCfg('precision', '3'), setP4: () => this.setCfg('precision', '4'),
+      onDistMin: (e) => this.setCfg('distMin', e.target.value), onDistMax: (e) => this.setCfg('distMax', e.target.value),
+      setCoordPolar: () => this.setCfg('coordSys', 'polar'), setCoordCart: () => this.setCfg('coordSys', 'cartesian'),
+      toggleQuality: () => this.setCfg('quality', !st.quality),
+      bgCaptured: st.bgCaptured, bgSubtract: st.bgSubtract,
+      captureBg: () => this.captureBackground(), clearBg: () => this.clearBackground(), toggleBgSub: () => this.toggleBgSubtract(),
+      bgTol: st.bgTol, onBgTol: (e) => this.setState({ bgTol: parseFloat(e.target.value) }), bgTolLabel: Math.round(st.bgTol * 100) + ' cm',
+      bgCapLabel: st.bgCaptured ? 'RE-CAPTURE BACKGROUND' : 'CAPTURE BACKGROUND',
+      bgSubSeg: seg(st.bgSubtract), bgSubLabel: st.bgSubtract ? 'ON' : 'OFF',
+      bgStatusLabel: st.bgCaptured ? (st.bgSubtract ? 'MASKING ACTIVE' : 'captured · off') : 'not captured',
+      bgStatusColor: st.bgCaptured ? (st.bgSubtract ? '#39ff7a' : '#ffb000') : '#5b636d',
+      bgSwBg: st.bgSubtract ? 'rgba(57,255,122,0.22)' : 'rgba(255,255,255,0.08)', bgSwBd: st.bgSubtract ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.12)',
+      bgKnobLeft: st.bgSubtract ? '22px' : '2px', bgKnobBg: st.bgSubtract ? '#39ff7a' : '#8b949e',
+      bgHasCapture: st.bgCaptured,
+      connSerialSeg: seg(st.connType === 'serial'), connNetSeg: seg(st.connType === 'network'),
+      tcpSeg: seg(st.netProto === 'tcp'), udpSeg: seg(st.netProto === 'udp'),
+      scanStdSeg: seg(st.scanMode === 'standard'), scanExpSeg: seg(st.scanMode === 'express'),
+      p1Seg: seg(st.precision === '1'), p2Seg: seg(st.precision === '2'), p3Seg: seg(st.precision === '3'), p4Seg: seg(st.precision === '4'),
+      coordPolarSeg: seg(st.coordSys === 'polar'), coordCartSeg: seg(st.coordSys === 'cartesian'),
+      qualitySeg: seg(st.quality), qualityLabel: st.quality ? 'ON' : 'OFF',
+
+      toolRows, drafting: st.drafting, draftCount: st.draftCount,
+      finishZone: () => this.finishZone(), cancelDraft: () => this.cancelDraft(), drawTool: () => this.setTool('draw'),
+      zoomIn: () => { this.view.z = Math.min(3.2, this.view.z * 1.15); },
+      zoomOut: () => { this.view.z = Math.max(0.5, this.view.z * 0.87); },
+      resetView: () => { this.view = { z: 1, panX: 0, panY: 0 }; },
+      coordRef: this.coordRef, canvasRef: this.canvasRef, wrapRef: this.wrapRef,
+
+      tabRows,
+      isTrack: st.rightTab === 'tracking', isZones: st.rightTab === 'zones', isOut: st.rightTab === 'output', isWarp: st.rightTab === 'warp',
+      objects, trackedCount: objects.length,
+      zoneRows,
+      warpToolActive: st.tool === 'warp' || st.rightTab === 'warp',
+      warpEnabled: we, toggleWarp: () => this.toggleWarp(),
+      warpToolBtn: () => this.setTool('warp'), resetWarp: () => this.resetWarp(),
+      rotateCW: () => this.warpRotate(Math.abs(st.warpRotStep || 0)), rotateCCW: () => this.warpRotate(-Math.abs(st.warpRotStep || 0)),
+      warpRotStep: st.warpRotStep, onRotStep: (e) => this.setState({ warpRotStep: parseFloat(e.target.value) || 0 }),
+      flipH: () => this.warpFlip('h'), flipV: () => this.warpFlip('v'),
+      selectAll: () => this.selectAllCorners(), clearSel: () => this.clearCornerSel(),
+      undo: () => this.undoWarp(), redo: () => this.redoWarp(),
+      canUndo: st.canUndo, canRedo: st.canRedo,
+      undoColor: st.canUndo ? '#cdd4dc' : '#454c54', redoColor: st.canRedo ? '#cdd4dc' : '#454c54',
+      warpSelLabel: (st.warpSelCount || 0) > 0 ? (st.warpSelCount + ' / 4 points selected') : 'drag a box to select',
+      warpSelColor: (st.warpSelCount || 0) > 0 ? '#7eeaf6' : '#717a84',
+      warpCornerRows, warpObjects, warpPreview,
+      warpRowBorder: we ? 'rgba(0,229,255,0.35)' : 'rgba(255,255,255,0.06)',
+      warpSwBg: we ? 'rgba(0,229,255,0.25)' : 'rgba(255,255,255,0.08)',
+      warpSwBorder: we ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)',
+      warpKnobLeft: we ? '22px' : '2px',
+      warpKnobBg: we ? '#00e5ff' : '#8b949e',
+
+      projectorOpen: st.projectorOpen,
+      monitorCanvasRef: this.monitorCanvasRef,
+      projWinOpen: st.projWinOpen,
+      projWinLabel: st.ndiOn ? '\u25CF NDI LIVE' : (st.projWinOpen ? '\u25CF WINDOW OPEN' : (st.projectorOpen ? '\u25CF FULLSCREEN' : '\u25CB idle')),
+      projWinDotColor: (st.ndiOn || st.projWinOpen || st.projectorOpen) ? '#39ff7a' : '#5b636d',
+      projWinBtnLabel: st.projWinOpen ? 'FOCUS OUTPUT WINDOW' : 'OPEN OUTPUT WINDOW',
+      closeProjectorWindow: () => this.closeProjectorWindow(),
+      openProjector: () => this.openProjector(), closeProjector: () => this.closeProjector(), projFullscreen: () => this.projFullscreen(),
+      openOutput: () => this.openOutput(),
+      outputMode: st.outputMode, isNdiMode: st.outputMode === 'ndi', ndiOn: st.ndiOn,
+      setModeWindow: () => this.setOutputMode('window'), setModeExt: () => this.setOutputMode('extended'), setModeNdi: () => this.setOutputMode('ndi'),
+      outModeWindowSeg: seg(st.outputMode === 'window'), outModeExtSeg: seg(st.outputMode === 'extended'), outModeNdiSeg: seg(st.outputMode === 'ndi'),
+      ndiName: st.ndiName, ndiW: st.ndiW, ndiH: st.ndiH, ndiFps: st.ndiFps,
+      onNdiName: (e) => this.setState({ ndiName: e.target.value }), onNdiFps: (e) => this.setState({ ndiFps: e.target.value }),
+      onNdiW: (e) => this.setState({ ndiW: (e.target.value || '').replace(/[^0-9]/g, '') }), onNdiH: (e) => this.setState({ ndiH: (e.target.value || '').replace(/[^0-9]/g, '') }),
+      setRes720: () => this.setNdiRes(1280, 720), setRes1080: () => this.setNdiRes(1920, 1080), setRes1440: () => this.setNdiRes(2560, 1440), setRes4k: () => this.setNdiRes(3840, 2160),
+      res720Seg: seg(st.ndiW === '1280' && st.ndiH === '720'), res1080Seg: seg(st.ndiW === '1920' && st.ndiH === '1080'), res1440Seg: seg(st.ndiW === '2560' && st.ndiH === '1440'), res4kSeg: seg(st.ndiW === '3840' && st.ndiH === '2160'),
+      ndiFit: st.ndiFit,
+      setFitFit: () => this.setState({ ndiFit: 'fit' }), setFitFill: () => this.setState({ ndiFit: 'fill' }), setFitStretch: () => this.setState({ ndiFit: 'stretch' }),
+      fitFitSeg: seg(st.ndiFit === 'fit'), fitFillSeg: seg(st.ndiFit === 'fill'), fitStretchSeg: seg(st.ndiFit === 'stretch'),
+      ndiAspect: (() => { const w = parseInt(st.ndiW) || 0, h = parseInt(st.ndiH) || 0; if (!w || !h) return '—'; const g = (a, b) => b ? g(b, a % b) : a; const d = g(w, h); return (w / d) + ':' + (h / d); })(),
+      fitDesc: st.ndiFit === 'fit' ? 'letterbox · whole map visible, may show bars' : (st.ndiFit === 'fill' ? 'crop · fills frame, edges may be cut' : 'stretch · fills frame, ignores aspect'),
+      ndiStatusLabel: st.ndiOn ? 'BROADCASTING' : 'idle', ndiStatusColor: st.ndiOn ? '#39ff7a' : '#5b636d',
+      outBtnLabel: st.outputMode === 'ndi' ? (st.ndiOn ? 'STOP NDI STREAM' : 'START NDI STREAM') : (st.outputMode === 'extended' ? (st.projWinOpen ? 'FOCUS EXTENDED DISPLAY' : 'OPEN ON EXTENDED DISPLAY') : (st.projWinOpen ? 'FOCUS OUTPUT WINDOW' : 'OPEN OUTPUT WINDOW')),
+      outBtnIcon: st.outputMode === 'ndi' ? '' : '\u2197',
+      outBtnBg: (st.outputMode === 'ndi' && st.ndiOn) ? 'rgba(255,77,94,0.12)' : 'rgba(0,229,255,0.1)',
+      outBtnBd: (st.outputMode === 'ndi' && st.ndiOn) ? 'rgba(255,77,94,0.45)' : 'rgba(0,229,255,0.4)',
+      outBtnCol: (st.outputMode === 'ndi' && st.ndiOn) ? '#ffc2c9' : '#cfeef5',
+      ndiBadge: st.ndiOn,
+      projChrome: st.projChrome, projChromeOff: !st.projChrome,
+      projCanvasRef: this.projCanvasRef, projWrapRef: this.projWrapRef,
+      projBright: st.projBright, onProjBright: (e) => this.setState({ projBright: parseFloat(e.target.value) }),
+      toggleProjGrid: () => this.setState(s => ({ projGrid: !s.projGrid })),
+      toggleProjLabels: () => this.setState(s => ({ projLabels: !s.projLabels })),
+      toggleProjTest: () => this.setState(s => ({ projTest: !s.projTest })),
+      toggleProjChrome: () => this.setState(s => ({ projChrome: !s.projChrome })),
+      pgGridBg: st.projGrid ? 'rgba(0,229,255,0.16)' : 'rgba(255,255,255,0.05)', pgGridBd: st.projGrid ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)', pgGridCol: st.projGrid ? '#9fe4ef' : '#9aa3ad',
+      pgLabBg: st.projLabels ? 'rgba(0,229,255,0.16)' : 'rgba(255,255,255,0.05)', pgLabBd: st.projLabels ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)', pgLabCol: st.projLabels ? '#9fe4ef' : '#9aa3ad',
+      pgTestBg: st.projTest ? 'rgba(0,229,255,0.16)' : 'rgba(255,255,255,0.05)', pgTestBd: st.projTest ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)', pgTestCol: st.projTest ? '#9fe4ef' : '#9aa3ad',
+      projWarpState: we ? 'WARP ON · 0\u20131 space' : 'WARP OFF · raw meters',
+      projWarpColor: we ? '#7eeaf6' : '#ffb000',
+      protocol: st.protocol,
+      setOsc: () => this.setState({ protocol: 'osc', port: '7000' }), setTuio: () => this.setState({ protocol: 'tuio', port: '3333' }),
+      oscBorder: st.protocol === 'osc' ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.09)',
+      oscBg: st.protocol === 'osc' ? 'rgba(0,229,255,0.1)' : '#10141a',
+      oscColor: st.protocol === 'osc' ? '#cfeef5' : '#9aa3ad',
+      tuioBorder: st.protocol === 'tuio' ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.09)',
+      tuioBg: st.protocol === 'tuio' ? 'rgba(0,229,255,0.1)' : '#10141a',
+      tuioColor: st.protocol === 'tuio' ? '#cfeef5' : '#9aa3ad',
+      onHost: (e) => this.setState({ host: e.target.value }), onPort: (e) => this.setState({ port: e.target.value }),
+      sendRate: st.sendRate, onRate: (e) => this.setState({ sendRate: e.target.value }),
+      addrPreview: addr, sendState: st.streaming ? 'SENDING ' + st.sendRate + ' Hz' : 'PAUSED',
+      oscLog: st.oscLog,
+      takeRows: st.takes
+    };
+  }
+}
+</script>
+</body>
+</html>

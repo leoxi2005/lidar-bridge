@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Read(//Users/macos/Library/Fonts/**)",
+      "Bash(ls node_modules/.bin/electron)",
+      "Bash(ls node_modules/serialport/package.json)",
+      "Bash(node -c main/main.js)",
+      "Bash(node -c main/rplidar.js)",
+      "Bash(node -c main/simulator.js)",
+      "Bash(node -e \"const {SerialPort}=require\\('serialport'\\); SerialPort.list\\(\\).then\\(p=>{console.log\\('serialport loads OK; ports:', p.map\\(x=>x.path\\)\\)}\\).catch\\(e=>console.log\\('list err', e.message\\)\\)\")",
+      "Read(//private/tmp/**)",
+      "Bash(node node_modules/electron/install.js)",
+      "Read(//Users/macos/Library/Caches/electron/**)",
+      "Read(//Users/macos/**)"
+    ]
+  }
+}

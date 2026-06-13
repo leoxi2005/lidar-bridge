@@ -1,0 +1,18 @@
+{
+  "name": "lidar-bridge",
+  "version": "0.1.0",
+  "description": "LiDAR Bridge — 2D LiDAR tracking → TouchDesigner (Step 1: serial acquisition + point cloud)",
+  "main": "main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "list-ports": "node -e \"require('@serialport/bindings-cpp').autoDetect().list().then(p=>console.log(p))\""
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.0"
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  }
+}

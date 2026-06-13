@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>LiDAR Bridge</title>
+<style>
+@font-face { font-family:'IBM Plex Sans'; src:local('IBM Plex Sans'); }
+* { box-sizing:border-box; }
+:root{
+  --bg:#0a0b0e; --panel:#0c0f13; --bar:#0e1115; --card:#10141a; --input:#0e1216; --input2:#0b0e11;
+  --border:rgba(255,255,255,0.07); --hair:rgba(255,255,255,0.06);
+  --cyan:#00e5ff; --green:#39ff7a; --amber:#ffb000; --red:#ff4d5e;
+  --t1:#e8ecf1; --t2:#9aa3ad; --t3:#cdd4dc; --muted:#717a84; --faint:#5b636d; --disabled:#454c54;
+}
+html,body{ margin:0; padding:0; height:100%; background:var(--bg); }
+body{ color:var(--t1); font-family:'IBM Plex Sans','Helvetica Neue',Arial,sans-serif; font-size:13px; overflow:hidden; }
+.mono{ font-family:'IBM Plex Mono','SF Mono',Menlo,monospace; }
+::-webkit-scrollbar{ width:8px; height:8px; }
+::-webkit-scrollbar-track{ background:transparent; }
+::-webkit-scrollbar-thumb{ background:rgba(255,255,255,0.1); border-radius:6px; }
+::-webkit-scrollbar-thumb:hover{ background:rgba(255,255,255,0.18); }
+input,select{ font-family:inherit; outline:none; }
+input:focus,select:focus{ border-color:rgba(0,229,255,0.5)!important; }
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+.app{ height:100vh; display:flex; flex-direction:column; }
+.topbar{ display:flex; align-items:center; gap:14px; height:50px; padding:0 14px; background:var(--bar);
+  border-bottom:1px solid var(--border); flex:0 0 auto; position:relative; z-index:5; }
+.vsep{ width:1px; height:24px; background:rgba(255,255,255,0.08); }
+.logo-title{ font-weight:700; letter-spacing:.04em; font-size:13.5px; }
+.logo-sub{ font-family:'IBM Plex Mono',monospace; font-size:8.5px; letter-spacing:.18em; color:var(--faint); text-transform:uppercase; }
+.btn{ display:flex; align-items:center; gap:8px; height:30px; padding:0 12px; border-radius:6px; cursor:pointer;
+  font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.04em; border:1px solid var(--border); background:#13171c; color:var(--t2); }
+.btn.cyan{ border-color:rgba(0,229,255,0.25); background:rgba(0,229,255,0.08); color:#cfeef5; }
+.btn.red{ border-color:rgba(255,77,94,0.3); background:rgba(255,77,94,0.07); color:#ffc2c9; }
+.stat{ display:flex; flex-direction:column; line-height:1.15; font-family:'IBM Plex Mono',monospace; font-size:11px; }
+.stat .k{ color:var(--faint); font-size:8.5px; letter-spacing:.12em; }
+.stat .v{ color:var(--t1); }
+.body{ flex:1; display:flex; min-height:0; }
+
+.col-left{ width:248px; flex:0 0 auto; background:var(--panel); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; overflow-y:auto; }
+.col-right{ width:312px; flex:0 0 auto; background:var(--panel); border-left:1px solid var(--border);
+  display:flex; flex-direction:column; min-height:0; }
+.center{ flex:1; position:relative; min-width:0; background:radial-gradient(120% 120% at 50% 38%, #0d1116 0%, #090a0d 70%); overflow:hidden; }
+canvas#scan{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+.sec-title{ font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.16em; color:var(--faint); }
+.lbl{ font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:.08em; }
+.input{ width:100%; height:28px; padding:0 8px; border-radius:5px; border:1px solid rgba(255,255,255,0.1);
+  background:var(--input); color:var(--t1); font-family:'IBM Plex Mono',monospace; font-size:11px; }
+select.input{ padding:0 6px; }
+.field{ display:flex; flex-direction:column; gap:4px; }
+.seg{ flex:1; height:28px; border-radius:5px; border:1px solid rgba(255,255,255,0.1); background:#0e1216; color:var(--t2);
+  cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.04em; }
+.seg.active{ border-color:rgba(0,229,255,0.5); background:rgba(0,229,255,0.12); color:#cfeef5; }
+.row{ display:flex; gap:6px; }
+.prim{ padding:9px; border-radius:6px; border:1px solid rgba(0,229,255,0.3); background:rgba(0,229,255,0.08);
+  color:#a9e8f1; cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.05em; }
+.prim.green{ border-color:rgba(57,255,122,0.3); background:rgba(57,255,122,0.08); color:#bff7d2; }
+.ghost{ padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:#13171c; color:var(--t2);
+  cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.04em; }
+.dashed{ margin:8px 10px 14px; padding:8px; border-radius:7px; border:1px dashed rgba(255,255,255,0.14); background:transparent;
+  color:var(--muted); cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.08em; }
+.hair{ height:1px; background:var(--hair); }
+
+.dev-card{ position:relative; display:flex; flex-direction:column; gap:5px; padding:9px 10px 9px 12px; border-radius:7px;
+  border:1px solid var(--border); background:var(--card); cursor:pointer; overflow:hidden; }
+.dev-card.sel{ border-color:rgba(0,229,255,0.35); background:rgba(0,229,255,0.06); }
+.dev-card.sel .selbar{ position:absolute; left:0; top:0; bottom:0; width:2.5px; background:var(--cyan); }
+.dev-name{ font-weight:600; font-size:12px; }
+.dot{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
+.float{ position:absolute; background:rgba(14,17,21,0.82); backdrop-filter:blur(6px); border:1px solid rgba(255,255,255,0.08); border-radius:9px; }
+
+.tabs{ display:flex; padding:4px; gap:3px; border-bottom:1px solid var(--border); flex:0 0 auto; }
+.tab{ flex:1; position:relative; height:34px; border:none; background:transparent; color:var(--muted); cursor:pointer;
+  font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.1em; border-radius:6px; }
+.tab.active{ color:var(--t1); }
+.tab.active .ul{ position:absolute; left:14px; right:14px; bottom:2px; height:2px; background:var(--cyan); border-radius:2px; }
+.tab-pane{ flex:1; min-height:0; display:none; flex-direction:column; }
+.tab-pane.active{ display:flex; }
+.note{ margin:14px; padding:11px 12px; border-radius:8px; background:var(--card); border:1px solid var(--border);
+  color:var(--t2); font-size:11.5px; line-height:1.5; }
+.note .mono{ color:var(--faint); font-size:10px; }
+.toolbtn{ width:34px; height:34px; display:flex; align-items:center; justify-content:center; border-radius:6px;
+  border:1px solid var(--border); background:transparent; color:var(--t2); cursor:pointer; padding:0; }
+.toolbtn.active{ border-color:rgba(0,229,255,0.5); background:rgba(0,229,255,0.12); color:#cfeef5; }
+.toolbtn:disabled{ opacity:.4; cursor:not-allowed; }
+.zoombtn{ width:30px; height:30px; border-radius:6px; border:1px solid rgba(255,255,255,0.09); background:rgba(14,17,21,0.85);
+  color:var(--t3); cursor:pointer; font-size:16px; line-height:1; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:9px">
+      <svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="#00e5ff" stroke-width="1" opacity="0.35"/><circle cx="12" cy="12" r="6" fill="none" stroke="#00e5ff" stroke-width="1" opacity="0.55"/><circle cx="12" cy="12" r="2" fill="#00e5ff"/><line x1="12" y1="12" x2="21" y2="6.5" stroke="#00e5ff" stroke-width="1.3"/></svg>
+      <div style="line-height:1.05">
+        <div class="logo-title">LiDAR<span style="color:#00e5ff">Bridge</span></div>
+        <div class="logo-sub">Tracking → TouchDesigner</div>
+      </div>
+    </div>
+    <div class="vsep"></div>
+    <button id="streamBtn" class="btn cyan">
+      <span id="streamGlyph"></span><span id="streamLabel">STREAMING</span>
+    </button>
+    <div style="display:flex;align-items:center;gap:18px">
+      <div class="stat"><span class="k">RENDER</span><span class="v"><span id="fps">0</span> <span style="color:#5b636d">fps</span></span></div>
+      <div class="stat"><span class="k">POINTS</span><span class="v" id="pointCount">0</span></div>
+      <div class="stat"><span class="k">LATENCY</span><span class="v"><span id="latency">—</span> <span style="color:#5b636d">ms</span></span></div>
+    </div>
+    <div style="flex:1"></div>
+    <button class="btn" id="protoPill">
+      <span class="dot" id="protoDot" style="background:#454c54"></span>
+      <span style="color:#cdd4dc">OSC</span><span style="color:#5b636d">→ 127.0.0.1:7000</span>
+    </button>
+    <button class="btn cyan" id="projectBtn">PROJECT</button>
+    <button class="btn red" id="recordBtn"><span class="dot" style="background:#ff4d5e"></span><span>RECORD</span></button>
+  </div>
+
+  <div class="body">
+
+    <!-- LEFT COLUMN -->
+    <div class="col-left">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px 9px">
+        <span class="sec-title">DEVICES</span>
+        <span class="mono" id="onlineCount" style="font-size:10px;color:#39ff7a">0 ONLINE</span>
+      </div>
+      <div id="deviceList" style="display:flex;flex-direction:column;gap:6px;padding:0 10px"></div>
+      <button class="dashed">+ ADD DEVICE</button>
+      <div class="hair" style="margin:0 0 4px"></div>
+
+      <div style="padding:11px 14px 8px" class="sec-title">CONNECTION · <span id="selName">RPLIDAR A3</span></div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <div class="row">
+          <button class="seg active" data-conn="serial">SERIAL</button>
+          <button class="seg" data-conn="network">NETWORK</button>
+        </div>
+        <div id="serialFields" class="row">
+          <label class="field" style="flex:1"><span class="lbl">COM PORT</span>
+            <input id="comPort" class="input" list="portList" value="SIM" />
+            <datalist id="portList"></datalist>
+          </label>
+          <label class="field" style="flex:1.2"><span class="lbl">BAUDRATE</span>
+            <select id="baudrate" class="input">
+              <option value="115200">115200</option>
+              <option value="256000">256000</option>
+              <option value="1000000" selected>1000000</option>
+            </select>
+          </label>
+        </div>
+        <div id="networkFields" class="row" style="display:none">
+          <label class="field" style="flex:1.6"><span class="lbl">IP ADDRESS</span><input id="ipAddr" class="input" value="192.168.11.2" /></label>
+          <label class="field" style="flex:1"><span class="lbl">PORT</span><input id="ipPort" class="input" value="8089" /></label>
+        </div>
+        <label class="field"><span class="lbl">SCAN MODE</span>
+          <div class="row">
+            <button class="seg" data-scan="standard">STANDARD</button>
+            <button class="seg active" data-scan="express">EXPRESS</button>
+          </div>
+        </label>
+        <button id="connectBtn" class="prim green" style="margin-top:2px">CONNECT</button>
+        <div id="connStatus" class="mono" style="font-size:9.5px;color:#717a84;min-height:12px">idle</div>
+      </div>
+
+      <div style="padding:14px 14px 8px" class="sec-title">ACQUISITION</div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="lbl">PRECISION</span><span class="mono" id="samplesLabel" style="font-size:9px;color:#5b636d">720 samples/scan</span>
+        </div>
+        <div class="row" id="precisionSeg">
+          <button class="seg" data-p="1">1</button>
+          <button class="seg active" data-p="2">2</button>
+          <button class="seg" data-p="3">3</button>
+          <button class="seg" data-p="4">4</button>
+        </div>
+        <div class="row">
+          <label class="field" style="flex:1"><span class="lbl">DIST MIN (m)</span><input id="distMin" class="input" value="0.0" /></label>
+          <label class="field" style="flex:1"><span class="lbl">DIST MAX (m)</span><input id="distMax" class="input" value="25.0" /></label>
+        </div>
+        <div class="row" style="align-items:flex-end">
+          <label class="field" style="flex:1.6"><span class="lbl">COORDINATE</span>
+            <div class="row">
+              <button class="seg" data-coord="polar" style="font-size:9.5px">POLAR</button>
+              <button class="seg active" data-coord="cartesian" style="font-size:9.5px">CARTESIAN</button>
+            </div>
+          </label>
+          <label class="field" style="flex:1"><span class="lbl">QUALITY</span>
+            <button id="qualityBtn" class="seg">FILTER OFF</button>
+          </label>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 14px 8px">
+        <span class="sec-title">BACKGROUND MASK</span><span class="mono" style="font-size:9px;color:#5b636d">step 3</span>
+      </div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <button class="prim" disabled style="opacity:.45;cursor:not-allowed">CAPTURE BACKGROUND</button>
+      </div>
+
+      <div style="padding:14px 14px 8px" class="sec-title">PLACEMENT · room map</div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <div class="row">
+          <label class="field" style="flex:1"><span class="lbl">POS X (m)</span><input id="posX" class="input" value="0.00" /></label>
+          <label class="field" style="flex:1"><span class="lbl">POS Y (m)</span><input id="posY" class="input" value="0.00" /></label>
+          <label class="field" style="flex:1"><span class="lbl">ROT (°)</span><input id="rot" class="input" value="0.0" /></label>
+        </div>
+      </div>
+      <div style="height:14px;flex:0 0 auto"></div>
+    </div>
+
+    <!-- CENTER -->
+    <div class="center" id="canvasWrap">
+      <canvas id="scan"></canvas>
+
+      <div class="float" style="top:12px;left:12px;display:flex;flex-direction:column;gap:5px;padding:5px">
+        <button class="toolbtn active" data-tool="select" title="Select / Pan">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2l9 5-4 1.2L6.5 13 3 2z" fill="currentColor"/></svg>
+        </button>
+        <button class="toolbtn" disabled title="Draw Zone (step 5)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3h10v10H3z" stroke="currentColor" stroke-width="1.3"/></svg>
+        </button>
+        <button class="toolbtn" disabled title="Warp / Corner-pin (step 7)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4l12-2v10L2 14z" stroke="currentColor" stroke-width="1.3"/></svg>
+        </button>
+        <button class="toolbtn" disabled title="Measure">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M5 6v4M9 6v4" stroke="currentColor" stroke-width="1.3"/></svg>
+        </button>
+      </div>
+
+      <div class="float mono" style="top:12px;right:12px;display:flex;flex-direction:column;gap:7px;padding:10px 12px;font-size:10px">
+        <div style="font-size:9px;letter-spacing:.14em;color:#5b636d">SCENE</div>
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:2px;background:#00e5ff"></span><span style="color:#9aa3ad">raw point cloud</span></div>
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid #39ff7a"></span><span style="color:#9aa3ad">tracked blob (step 4)</span></div>
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:2px;background:rgba(0,229,255,0.28);border:1px solid rgba(0,229,255,0.6)"></span><span style="color:#9aa3ad">trigger zone (step 5)</span></div>
+      </div>
+
+      <div class="float mono" style="bottom:12px;left:12px;display:flex;gap:9px;align-items:center;padding:7px 11px;font-size:10.5px;color:#9aa3ad">
+        <span style="color:#5b636d">CURSOR</span><span id="cursor" style="color:#cdd4dc;min-width:96px;display:inline-block">x 0.00  y 0.00</span>
+      </div>
+
+      <div style="position:absolute;bottom:12px;right:12px;display:flex;gap:6px;align-items:center">
+        <button class="zoombtn" id="zoomOut">−</button>
+        <button class="zoombtn mono" id="fitBtn" style="width:auto;padding:0 11px;font-size:10px;color:#9aa3ad">FIT</button>
+        <button class="zoombtn" id="zoomIn">+</button>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="col-right">
+      <div class="tabs">
+        <button class="tab active" data-tab="track">TRACK<span class="ul"></span></button>
+        <button class="tab" data-tab="zones">ZONES<span class="ul"></span></button>
+        <button class="tab" data-tab="warp">WARP<span class="ul"></span></button>
+        <button class="tab" data-tab="output">OUTPUT<span class="ul"></span></button>
+      </div>
+
+      <div class="tab-pane active" data-pane="track">
+        <div style="display:flex;padding:9px 14px 7px" class="mono" >
+          <span style="width:44px;font-size:9px;letter-spacing:.1em;color:#5b636d">ID</span>
+          <span style="flex:1;font-size:9px;letter-spacing:.1em;color:#5b636d">X / Y (m)</span>
+          <span style="width:46px;text-align:right;font-size:9px;color:#5b636d">VEL</span>
+          <span style="width:74px;text-align:right;font-size:9px;color:#5b636d">ZONE</span>
+        </div>
+        <div id="trackList" style="flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:4px"></div>
+        <div class="note">No tracked objects yet. Clustering &amp; ID tracking arrive in <b>build step 4</b>. This step streams the raw point cloud from the sensor.</div>
+        <div style="flex:0 0 auto;padding:10px 14px;border-top:1px solid var(--hair);display:flex;justify-content:space-between" class="mono">
+          <span style="font-size:10px;color:#5b636d">TRACKED <span style="color:#39ff7a" id="trackedCount">0</span></span>
+          <span style="font-size:10px;color:#5b636d">CLUSTER ε 0.30m</span>
+        </div>
+      </div>
+
+      <div class="tab-pane" data-pane="zones">
+        <div class="note">Trigger zones (draw polygons, point-in-polygon occupancy) arrive in <b>build step 5</b>.</div>
+      </div>
+      <div class="tab-pane" data-pane="warp">
+        <div class="note">Coordinate warp / corner-pin homography and the output monitor arrive in <b>build step 7–8</b>.</div>
+      </div>
+      <div class="tab-pane" data-pane="output">
+        <div class="note">OSC / TUIO network output to TouchDesigner arrives in <b>build step 6</b>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="./renderer.js"></script>
+</body>
+</html>
