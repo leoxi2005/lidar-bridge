@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('lidar', {
   captureBg: () => ipcRenderer.invoke('lidar:bg-capture'),
   clearBg: () => ipcRenderer.invoke('lidar:bg-clear'),
   setZones: (zones) => ipcRenderer.invoke('lidar:zones', zones),
+  setOutput: (cfg) => ipcRenderer.invoke('lidar:output', cfg),
+  onOscLog: (cb) => {
+    const h = (_e, lines) => cb(lines);
+    ipcRenderer.on('lidar:osc-log', h);
+    return () => ipcRenderer.removeListener('lidar:osc-log', h);
+  },
 
   onScan: (cb) => {
     const h = (_e, data) => cb(data);

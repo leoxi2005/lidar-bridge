@@ -114,7 +114,7 @@ select.input{ padding:0 6px; }
     <div style="flex:1"></div>
     <button class="btn" id="protoPill">
       <span class="dot" id="protoDot" style="background:#454c54"></span>
-      <span style="color:#cdd4dc">OSC</span><span style="color:#5b636d">→ 127.0.0.1:7000</span>
+      <span id="protoName" style="color:#cdd4dc">OSC</span><span id="protoAddr" style="color:#5b636d">→ 127.0.0.1:7000</span>
     </button>
     <button class="btn cyan" id="projectBtn">PROJECT</button>
     <button class="btn red" id="recordBtn"><span class="dot" style="background:#ff4d5e"></span><span>RECORD</span></button>
@@ -306,7 +306,30 @@ select.input{ padding:0 6px; }
         <div class="note">Coordinate warp / corner-pin homography and the output monitor arrive in <b>build step 7–8</b>.</div>
       </div>
       <div class="tab-pane" data-pane="output">
-        <div class="note">OSC / TUIO network output to TouchDesigner arrives in <b>build step 6</b>.</div>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">
+          <div style="padding:12px 14px 6px;display:flex;gap:6px">
+            <button class="seg active" data-proto="osc">OSC</button>
+            <button class="seg" data-proto="tuio">TUIO</button>
+          </div>
+          <div style="padding:0 14px 6px;display:flex;gap:8px">
+            <label class="field" style="flex:1.7"><span class="lbl">TARGET HOST</span><input id="oscHost" class="input" value="127.0.0.1" /></label>
+            <label class="field" style="flex:1"><span class="lbl">PORT</span><input id="oscPort" class="input" value="7000" /></label>
+          </div>
+          <label class="field" style="padding:0 14px 6px"><span class="lbl">SEND RATE</span>
+            <div class="row">
+              <button class="seg" data-rate="10">10 Hz</button>
+              <button class="seg active" data-rate="30">30 Hz</button>
+              <button class="seg" data-rate="60">60 Hz</button>
+            </div>
+          </label>
+          <div style="padding:6px 14px 4px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.14em;color:#5b636d">ADDRESS PATTERN</div>
+          <div id="oscPreview" class="mono" style="margin:0 14px;padding:9px 11px;border-radius:7px;background:#0b0e11;border:1px solid var(--border);font-size:10px;color:#9aa3ad;line-height:1.7;white-space:pre">/lidar/trk/&lt;id&gt;  x  y  vel\n/lidar/zone/&lt;slug&gt;  0|1</div>
+          <div style="padding:10px 14px 4px;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.14em;color:#5b636d">LIVE MESSAGES</span>
+            <span class="mono" id="oscRateLabel" style="font-size:9px;color:#39ff7a"></span>
+          </div>
+          <div id="oscMonitor" class="mono" style="flex:1;min-height:0;overflow-y:auto;margin:0 14px 12px;padding:8px 10px;border-radius:7px;background:#0b0e11;border:1px solid var(--border);font-size:10px;color:#7c8893;line-height:1.6;display:flex;flex-direction:column;gap:1px"></div>
+        </div>
       </div>
     </div>
   </div>

@@ -5,11 +5,20 @@ const fs = require('fs');
 const { RPLidar } = require('./rplidar');
 const { Simulator } = require('./simulator');
 const { Pipeline } = require('./pipeline');
+const { OscSender, oscMessage, oscBundle } = require('./osc');
 
 let win = null;
 let source = null; // active RPLidar | Simulator
 const pipeline = new Pipeline();
 let lastScanAt = 0;
+
+// network output
+const sender = new OscSender();
+let outCfg = { protocol: 'osc', host: '127.0.0.1', port: 7000, sendRate: 30, normalize: false };
+let sendTimer = null;
+let tuioFseq = 0;
+let lastLogAt = 0;
+let latestOut = { tracks: [], zones: [] };
 
 function createWindow() {
   win = new BrowserWindow({
@@ -44,6 +53,70 @@ function onScan(nodes) {
   const frame = pipeline.process(nodes, dtSec);
   frame.periodMs = periodMs;
   send('lidar:scan', frame);
+
+  latestOut = {
+    tracks: frame.tracks,
+    zones: pipeline.zones.map((z, i) => ({ slug: z.slug, on: !!frame.zoneOcc[i] })),
+  };
+}
+
+// ---- network output -------------------------------------------------------
+function startSender() {
+  stopSender();
+  sender.configure({ host: outCfg.host, port: outCfg.port });
+  const hz = Math.max(1, Math.min(120, outCfg.sendRate));
+  sendTimer = setInterval(emitOutput, 1000 / hz);
+}
+function stopSender() {
+  if (sendTimer) clearInterval(sendTimer);
+  sendTimer = null;
+}
+
+function emitOutput() {
+  if (!source) return;
+  const lines = [];
+  // Coordinate is normalized u,v in [0,1] when warp "apply to output" is on (step 7),
+  // otherwise raw world metres.
+  const coord = (t) => (outCfg.normalize && t.u != null ? [t.u, t.v] : [t.x, t.y]);
+
+  if (outCfg.protocol === 'tuio') {
+    const msgs = [];
+    msgs.push(oscMessage('/tuio/2Dobj', [{ type: 's', value: 'source' }, { type: 's', value: 'LidarBridge' }]));
+    const alive = [{ type: 's', value: 'alive' }];
+    for (const t of latestOut.tracks) alive.push({ type: 'i', value: parseInt(t.id, 10) });
+    msgs.push(oscMessage('/tuio/2Dobj', alive));
+    for (const t of latestOut.tracks) {
+      const [a, b] = coord(t);
+      const sid = parseInt(t.id, 10);
+      msgs.push(oscMessage('/tuio/2Dobj', [
+        { type: 's', value: 'set' }, { type: 'i', value: sid }, { type: 'i', value: sid },
+        { type: 'f', value: a }, { type: 'f', value: b }, { type: 'f', value: 0 },
+        { type: 'f', value: t.vx || 0 }, { type: 'f', value: t.vy || 0 }, { type: 'f', value: 0 },
+        { type: 'f', value: t.vel || 0 }, { type: 'f', value: 0 },
+      ]));
+      lines.push(`/tuio/2Dobj set ${sid} ${a.toFixed(3)} ${b.toFixed(3)}`);
+    }
+    msgs.push(oscMessage('/tuio/2Dobj', [{ type: 's', value: 'fseq' }, { type: 'i', value: ++tuioFseq }]));
+    sender.sendRaw(oscBundle(msgs));
+  } else {
+    for (const t of latestOut.tracks) {
+      const [a, b] = coord(t);
+      const addr = `/lidar/trk/${t.id}`;
+      sender.sendMessage(addr, [{ type: 'f', value: a }, { type: 'f', value: b }, { type: 'f', value: t.vel || 0 }]);
+      lines.push(`${addr}  ${a.toFixed(outCfg.normalize ? 3 : 2)}  ${b.toFixed(outCfg.normalize ? 3 : 2)}  ${(t.vel || 0).toFixed(2)}`);
+    }
+    for (const z of latestOut.zones) {
+      const addr = `/lidar/zone/${z.slug}`;
+      sender.sendMessage(addr, [{ type: 'i', value: z.on ? 1 : 0 }]);
+      lines.push(`${addr}  ${z.on ? 1 : 0}`);
+    }
+  }
+
+  const now = Date.now();
+  if (lines.length && now - lastLogAt > 140) {
+    lastLogAt = now;
+    send('lidar:osc-log', lines);
+  }
 }
 
 function wireSource(src) {
@@ -55,6 +128,7 @@ function wireSource(src) {
 }
 
 async function teardownSource() {
+  stopSender();
   if (source) {
     try {
       await source.disconnect();
@@ -100,6 +174,7 @@ ipcMain.handle('lidar:connect', async (_evt, config) => {
       source = new Simulator();
       wireSource(source);
       const info = await source.connect();
+      startSender();
       return { ok: true, simulated: true, info };
     }
     if (config.connType === 'network') {
@@ -111,6 +186,7 @@ ipcMain.handle('lidar:connect', async (_evt, config) => {
       path: config.comPort,
       baudRate: parseInt(config.baudrate, 10) || 115200,
     });
+    startSender();
     return { ok: true, simulated: false, info };
   } catch (e) {
     await teardownSource();
@@ -140,6 +216,18 @@ ipcMain.handle('lidar:bg-clear', async () => {
 
 ipcMain.handle('lidar:zones', async (_evt, zones) => {
   pipeline.setZones(zones);
+  return { ok: true };
+});
+
+ipcMain.handle('lidar:output', async (_evt, patch) => {
+  const rateChanged = patch.sendRate !== undefined && patch.sendRate !== outCfg.sendRate;
+  if (patch.protocol !== undefined) outCfg.protocol = patch.protocol;
+  if (patch.host !== undefined) outCfg.host = patch.host;
+  if (patch.port !== undefined) outCfg.port = parseInt(patch.port, 10) || outCfg.port;
+  if (patch.sendRate !== undefined) outCfg.sendRate = parseInt(patch.sendRate, 10) || outCfg.sendRate;
+  if (patch.normalize !== undefined) outCfg.normalize = !!patch.normalize;
+  sender.configure({ host: outCfg.host, port: outCfg.port });
+  if (rateChanged && sendTimer) startSender();
   return { ok: true };
 });
 

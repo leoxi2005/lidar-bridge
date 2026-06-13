@@ -163,6 +163,36 @@ function finishZone() {
 }
 function cancelDraft() { setTool('select'); }
 
+// ---- output (OSC / TUIO) --------------------------------------------------
+const out = { protocol: 'osc', host: '127.0.0.1', port: '7000', sendRate: '30', normalize: false };
+
+function pushOutput() {
+  window.lidar.setOutput(out);
+  updatePill();
+}
+function updatePill() {
+  $('protoName').textContent = out.protocol.toUpperCase();
+  $('protoAddr').textContent = '→ ' + out.host + ':' + out.port;
+}
+function updateOscPreview() {
+  const pre = $('oscPreview');
+  const c = out.normalize ? 'u  v' : 'x  y';
+  if (out.protocol === 'tuio') pre.textContent = '/tuio/2Dobj set <s> <c> ' + (out.normalize ? 'u v' : 'x y') + ' …\n/tuio/2Dobj alive […]  +  fseq <n>';
+  else pre.textContent = '/lidar/trk/<id>  ' + c + '  vel\n/lidar/zone/<slug>  0|1';
+}
+function appendOscLog(lines) {
+  const mon = $('oscMonitor');
+  for (const l of lines) {
+    const d = document.createElement('div');
+    d.textContent = l;
+    if (l.includes('/zone/')) d.style.color = '#00e5ff';
+    mon.appendChild(d);
+  }
+  while (mon.childElementCount > 80) mon.removeChild(mon.firstChild);
+  mon.scrollTop = mon.scrollHeight;
+  $('oscRateLabel').textContent = out.sendRate + ' Hz';
+}
+
 function updateTrails(ts) {
   const live = new Set(ts.map((t) => t.id));
   for (const id of trails.keys()) if (!live.has(id)) trails.delete(id);
@@ -630,11 +660,7 @@ function wireControls() {
 
   // tabs
   document.querySelectorAll('.tab').forEach((t) => {
-    t.onclick = () => {
-      ui.tab = t.getAttribute('data-tab');
-      document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-      document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('active', p.getAttribute('data-pane') === ui.tab));
-    };
+    t.onclick = () => switchTab(t.getAttribute('data-tab'));
   });
 
   // zoom / pan
@@ -678,17 +704,41 @@ function wireControls() {
   });
   $('finishZone').onclick = finishZone;
   $('cancelZone').onclick = cancelDraft;
-  $('drawNewZone').onclick = () => {
-    ui.tab = 'zones';
-    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.getAttribute('data-tab') === 'zones'));
-    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('active', p.getAttribute('data-pane') === 'zones'));
-    setTool('zone');
-  };
+
+  // output (OSC / TUIO)
+  document.querySelectorAll('[data-proto]').forEach((b) => {
+    b.onclick = () => {
+      out.protocol = b.getAttribute('data-proto');
+      document.querySelectorAll('[data-proto]').forEach((x) => x.classList.toggle('active', x === b));
+      updateOscPreview();
+      pushOutput();
+    };
+  });
+  document.querySelectorAll('[data-rate]').forEach((b) => {
+    b.onclick = () => {
+      out.sendRate = b.getAttribute('data-rate');
+      document.querySelectorAll('[data-rate]').forEach((x) => x.classList.toggle('active', x === b));
+      pushOutput();
+    };
+  });
+  $('oscHost').onchange = () => { out.host = $('oscHost').value; pushOutput(); };
+  $('oscPort').onchange = () => { out.port = $('oscPort').value; pushOutput(); };
+  updateOscPreview();
+  updatePill();
+  $('drawNewZone').onclick = () => { switchTab('zones'); setTool('zone'); };
+
+  $('protoPill').onclick = () => switchTab('output');
 
   // inert buttons (later steps) — give honest feedback
-  ['projectBtn', 'recordBtn', 'protoPill'].forEach((id) => {
+  ['projectBtn', 'recordBtn'].forEach((id) => {
     $(id).onclick = () => setConnStatus($(id).textContent.trim() + ' — implemented in a later build step', '#717a84');
   });
+}
+
+function switchTab(name) {
+  ui.tab = name;
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.getAttribute('data-tab') === name));
+  document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('active', p.getAttribute('data-pane') === name));
 }
 
 function renderStreamGlyph() {
@@ -723,6 +773,7 @@ function boot() {
   window.lidar.onScan(ingestScan);
   window.lidar.onStatus((msg) => setConnStatus(msg, '#9aa3ad'));
   window.lidar.onInfo((info) => console.log('device info', info));
+  window.lidar.onOscLog(appendOscLog);
 
   requestAnimationFrame(draw);
 }
