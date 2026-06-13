@@ -219,6 +219,12 @@ ipcMain.handle('lidar:zones', async (_evt, zones) => {
   return { ok: true };
 });
 
+ipcMain.handle('lidar:warp', async (_evt, patch) => {
+  pipeline.setWarp(patch);
+  if (patch.enabled !== undefined) outCfg.normalize = !!patch.enabled; // "apply to output"
+  return { ok: true };
+});
+
 ipcMain.handle('lidar:output', async (_evt, patch) => {
   const rateChanged = patch.sendRate !== undefined && patch.sendRate !== outCfg.sendRate;
   if (patch.protocol !== undefined) outCfg.protocol = patch.protocol;

@@ -239,7 +239,7 @@ select.input{ padding:0 6px; }
         <button class="toolbtn" data-tool="zone" title="Draw Zone">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3h10v10H3z" stroke="currentColor" stroke-width="1.3"/></svg>
         </button>
-        <button class="toolbtn" disabled title="Warp / Corner-pin (step 7)">
+        <button class="toolbtn" data-tool="warp" title="Warp / Corner-pin">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4l12-2v10L2 14z" stroke="currentColor" stroke-width="1.3"/></svg>
         </button>
         <button class="toolbtn" disabled title="Measure">
@@ -302,8 +302,65 @@ select.input{ padding:0 6px; }
           <button id="drawNewZone" style="width:100%;padding:10px;border-radius:7px;border:1px solid rgba(0,229,255,0.3);background:rgba(0,229,255,0.07);color:#a9e8f1;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.06em">+ DRAW NEW ZONE</button>
         </div>
       </div>
-      <div class="tab-pane" data-pane="warp">
-        <div class="note">Coordinate warp / corner-pin homography and the output monitor arrive in <b>build step 7–8</b>.</div>
+      <div class="tab-pane" data-pane="warp" style="overflow-y:auto">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 14px 4px;padding:11px 12px;border-radius:8px;background:#10141a;border:1px solid var(--border)" id="warpApplyRow">
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <span style="font-weight:600;font-size:12.5px;color:#dbe1e8">Apply to output</span>
+            <span class="mono" style="font-size:9.5px;color:#5b636d">send normalized 0–1 coords</span>
+          </div>
+          <button id="warpToggle" style="width:46px;height:26px;border-radius:20px;border:1px solid rgba(255,255,255,0.12);background:#0e1216;cursor:pointer;position:relative;padding:0;flex:0 0 auto">
+            <span id="warpKnob" style="position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#717a84;transition:left .15s ease"></span>
+          </button>
+        </div>
+
+        <div style="padding:11px 14px 4px;display:flex;align-items:center;justify-content:space-between">
+          <span class="mono" style="font-size:9.5px;letter-spacing:0.14em;color:#5b636d">TRANSFORM</span>
+          <span class="mono" id="warpSel" style="font-size:9.5px;color:#5b636d">no selection</span>
+        </div>
+        <div style="padding:0 14px 6px;display:flex;gap:6px">
+          <button id="warpSelectAll" class="ghost" style="flex:1">SELECT ALL</button>
+          <button id="warpClear" class="ghost" style="flex:1">CLEAR</button>
+          <button id="warpUndo" class="ghost" title="undo (Ctrl+Z)" style="width:42px;font-size:15px">&#8634;</button>
+          <button id="warpRedo" class="ghost" title="redo (Ctrl+Shift+Z)" style="width:42px;font-size:15px">&#8635;</button>
+        </div>
+        <div style="padding:0 14px 6px;display:flex;gap:6px;align-items:center">
+          <span class="mono" style="width:46px;flex:0 0 auto;font-size:10px;color:#9aa3ad;letter-spacing:0.06em">ROTATE</span>
+          <input id="warpRotStep" class="input" value="15" style="flex:1" />
+          <button id="warpRotCCW" class="ghost" style="width:36px;font-size:15px">&#8630;</button>
+          <button id="warpRotCW" class="ghost" style="width:36px;font-size:15px">&#8631;</button>
+        </div>
+        <div style="padding:0 14px 4px;display:flex;gap:6px">
+          <button id="warpFlipH" class="ghost" style="flex:1">FLIP H</button>
+          <button id="warpFlipV" class="ghost" style="flex:1">FLIP V</button>
+        </div>
+
+        <div style="padding:11px 14px 2px" class="mono"><span style="font-size:9.5px;letter-spacing:0.14em;color:#5b636d">CORNER-PIN · exact corners (m)</span></div>
+        <div id="warpCorners" style="padding:4px 14px;display:flex;flex-direction:column;gap:7px"></div>
+
+        <div style="display:flex;gap:8px;padding:10px 14px 4px">
+          <button id="warpDragBtn" class="prim" style="flex:1;height:34px">DRAG ON MAP</button>
+          <button id="warpReset" class="ghost" style="flex:1;height:34px">RESET</button>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px 6px">
+          <span class="mono" style="font-size:9.5px;letter-spacing:0.14em;color:#5b636d">OUTPUT MONITOR · live mapping</span>
+          <span class="mono" id="monLabel" style="font-size:9px;color:#5b636d">NORMALIZED 0–1</span>
+        </div>
+        <div style="flex:0 0 auto;margin:0 14px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);background:#000;height:152px;position:relative">
+          <canvas id="monitor" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+          <span id="ndiBadge" style="display:none;position:absolute;top:8px;left:8px;align-items:center;gap:5px;padding:3px 8px;border-radius:20px;background:rgba(255,77,94,0.18);border:1px solid rgba(255,77,94,0.5);font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffc2c9"><span style="width:6px;height:6px;border-radius:50%;background:#ff4d5e;animation:blink 1.2s infinite"></span>NDI</span>
+        </div>
+
+        <div style="padding:10px 14px 4px" class="mono"><span style="font-size:9px;letter-spacing:0.14em;color:#5b636d">OUTPUT MODE</span></div>
+        <div style="padding:0 14px 6px;display:flex;gap:6px">
+          <button class="seg active" data-omode="window" style="font-size:9.5px">WINDOW</button>
+          <button class="seg" data-omode="extended" style="font-size:9.5px">EXTENDED</button>
+          <button class="seg" data-omode="ndi" style="font-size:9.5px">NDI</button>
+        </div>
+        <div id="ndiConfig" style="display:none;padding:0 14px 6px;flex-direction:column;gap:7px"></div>
+        <div style="padding:6px 14px 16px">
+          <button id="outputAction" class="prim" style="width:100%;height:36px">OPEN OUTPUT WINDOW</button>
+        </div>
       </div>
       <div class="tab-pane" data-pane="output">
         <div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">

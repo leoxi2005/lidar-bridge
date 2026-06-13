@@ -70,6 +70,48 @@ const trails = new Map(); // id -> [[x,y], ...] motion trail
 let zones = []; // [{ name, slug, pts:[[x,y]], visible, occupied }]
 let draft = []; // world points of the zone being drawn
 
+// ---- homography (mirrors main/homography.js) ------------------------------
+function hSolve(A, b, n) {
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+    [A[col], A[piv]] = [A[piv], A[col]]; [b[col], b[piv]] = [b[piv], b[col]];
+    const d = A[col][col] || 1e-12;
+    for (let r = 0; r < n; r++) { if (r === col) continue; const f = A[r][col] / d; for (let c = col; c < n; c++) A[r][c] -= f * A[col][c]; b[r] -= f * b[col]; }
+  }
+  const x = new Array(n);
+  for (let i = 0; i < n; i++) x[i] = b[i] / (A[i][i] || 1e-12);
+  return x;
+}
+function computeH(src, dst) {
+  const D = dst || [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = D[i];
+    A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -x * v, -y * v]); b.push(v);
+  }
+  const h = hSolve(A, b, 8); h.push(1); return h;
+}
+function applyH(H, x, y) { const d = H[6] * x + H[7] * y + H[8] || 1e-12; return [(H[0] * x + H[1] * y + H[2]) / d, (H[3] * x + H[4] * y + H[5]) / d]; }
+function invert3(H) {
+  const [a, b, c, d, e, f, g, h, i] = H;
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  const det = a * A + b * B + c * C || 1e-12, id = 1 / det;
+  return [A * id, (c * h - b * i) * id, (b * f - c * e) * id, B * id, (a * i - c * g) * id, (c * d - a * f) * id, C * id, (b * g - a * h) * id, (a * e - b * d) * id];
+}
+
+// ---- warp state -----------------------------------------------------------
+const CORNER_TAGS = ['TL', 'TR', 'BR', 'BL'];
+const WARP_TARGETS = ['0,0', '1,0', '1,1', '0,1'];
+const warp = {
+  corners: [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]],
+  enabled: false, H: null, Hinv: null,
+  sel: [], rotStep: 15, undo: [], redo: [], marquee: null,
+};
+function recomputeWarp() { warp.H = computeH(warp.corners); warp.Hinv = invert3(warp.H); }
+recomputeWarp();
+
 function ingestScan(frame) {
   if (!ui.streaming) return;
   const now = performance.now();
@@ -162,6 +204,108 @@ function finishZone() {
   setTool('select');
 }
 function cancelDraft() { setTool('select'); }
+
+// ---- warp overlay + interaction -------------------------------------------
+function warpInteractive() { return ui.tool === 'warp' || ui.tab === 'warp'; }
+
+function drawWarpOverlay(s) {
+  const showWarp = warpInteractive() || warp.enabled;
+  if (!showWarp || !warp.Hinv) return;
+  const c = warp.corners, Hi = warp.Hinv, on = warp.enabled, interactive = warpInteractive();
+  const mapU = (u, v) => { const d = Hi[6] * u + Hi[7] * v + Hi[8]; return [(Hi[0] * u + Hi[1] * v + Hi[2]) / d, (Hi[3] * u + Hi[4] * v + Hi[5]) / d]; };
+  // fill
+  ctx.beginPath(); c.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath();
+  ctx.fillStyle = on ? 'rgba(0,229,255,0.07)' : 'rgba(139,160,170,0.045)'; ctx.fill();
+  // perspective grid
+  const N = 8; ctx.lineWidth = 1; ctx.strokeStyle = on ? 'rgba(0,229,255,0.26)' : 'rgba(139,160,170,0.2)';
+  for (let i = 1; i < N; i++) {
+    const u = i / N;
+    const a = mapU(u, 0), b = mapU(u, 1); const pa = wts(a[0], a[1]), pb = wts(b[0], b[1]);
+    ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
+    const cc = mapU(0, u), dd = mapU(1, u); const pc = wts(cc[0], cc[1]), pd = wts(dd[0], dd[1]);
+    ctx.beginPath(); ctx.moveTo(pc[0], pc[1]); ctx.lineTo(pd[0], pd[1]); ctx.stroke();
+  }
+  // outline
+  ctx.beginPath(); c.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath();
+  ctx.lineWidth = 2; ctx.strokeStyle = on ? '#00e5ff' : '#8fa3ad'; ctx.stroke();
+  // corner handles
+  c.forEach((p, i) => {
+    const [sx, sy] = wts(p[0], p[1]);
+    const isSel = warp.sel.indexOf(i) >= 0;
+    const r = interactive ? (isSel ? 8 : 6) : 5;
+    ctx.beginPath(); ctx.arc(sx, sy, r, 0, 2 * Math.PI);
+    ctx.fillStyle = isSel ? '#ffffff' : (on ? '#00e5ff' : '#8fa3ad');
+    ctx.shadowColor = (on || isSel) ? '#00e5ff' : 'transparent'; ctx.shadowBlur = isSel ? 13 : (interactive ? 8 : 0); ctx.fill(); ctx.shadowBlur = 0;
+    if (isSel) { ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2; ctx.stroke(); }
+    else { ctx.fillStyle = '#06181c'; ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, 2 * Math.PI); ctx.fill(); }
+    if (interactive) {
+      ctx.font = "600 10px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = isSel ? '#ffffff' : (on ? '#bff3fb' : '#b9c6cd'); ctx.fillText('(' + WARP_TARGETS[i] + ')', sx, sy - 14);
+    }
+  });
+  // marquee
+  if (warp.marquee) {
+    const m = warp.marquee, x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1), w = Math.abs(m.x1 - m.x0), h = Math.abs(m.y1 - m.y0);
+    ctx.fillStyle = 'rgba(0,229,255,0.08)'; ctx.fillRect(x, y, w, h);
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(0,229,255,0.9)'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+  }
+}
+
+function pushWarp() { recomputeWarp(); window.lidar.setWarp({ corners: warp.corners, enabled: warp.enabled }); renderCornerInputs(); }
+function warpSnapshot() { warp.undo.push(JSON.stringify(warp.corners)); if (warp.undo.length > 80) warp.undo.shift(); warp.redo = []; updateWarpButtons(); }
+function setWarpEnabled(on) {
+  warp.enabled = on;
+  $('warpKnob').style.left = on ? '24px' : '2px';
+  $('warpKnob').style.background = on ? '#00e5ff' : '#717a84';
+  $('warpToggle').style.borderColor = on ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)';
+  $('warpToggle').style.background = on ? 'rgba(0,229,255,0.12)' : '#0e1216';
+  pushWarp();
+}
+function updateWarpSel() {
+  $('warpSel').textContent = warp.sel.length ? warp.sel.length + ' selected' : 'no selection';
+  $('warpSel').style.color = warp.sel.length ? '#9fe4ef' : '#5b636d';
+}
+function updateWarpButtons() {
+  $('warpUndo').style.color = warp.undo.length ? '#cdd4dc' : '#454c54';
+  $('warpRedo').style.color = warp.redo.length ? '#cdd4dc' : '#454c54';
+}
+function renderCornerInputs() {
+  const box = $('warpCorners');
+  box.innerHTML = '';
+  warp.corners.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px';
+    row.innerHTML =
+      `<span style="width:48px;display:flex;flex-direction:column;line-height:1.15;flex:0 0 auto"><span class="mono" style="font-size:11.5px;color:#cdd4dc;font-weight:600">${CORNER_TAGS[i]}</span><span class="mono" style="font-size:8.5px;color:#00e5ff">→ ${WARP_TARGETS[i]}</span></span>
+       <input class="input wc-x" data-i="${i}" value="${p[0].toFixed(2)}" style="flex:1;min-width:0">
+       <input class="input wc-y" data-i="${i}" value="${p[1].toFixed(2)}" style="flex:1;min-width:0">`;
+    box.appendChild(row);
+  });
+  box.querySelectorAll('.wc-x').forEach((inp) => inp.onchange = () => { const i = +inp.getAttribute('data-i'); warpSnapshot(); warp.corners[i][0] = parseFloat(inp.value) || 0; pushWarp(); });
+  box.querySelectorAll('.wc-y').forEach((inp) => inp.onchange = () => { const i = +inp.getAttribute('data-i'); warpSnapshot(); warp.corners[i][1] = parseFloat(inp.value) || 0; pushWarp(); });
+}
+function warpGroupCenter(idxs) {
+  const ix = idxs.length ? idxs : [0, 1, 2, 3];
+  let cx = 0, cy = 0; for (const i of ix) { cx += warp.corners[i][0]; cy += warp.corners[i][1]; }
+  return [cx / ix.length, cy / ix.length];
+}
+function warpRotate(deg) {
+  const idxs = warp.sel.length ? warp.sel : [0, 1, 2, 3];
+  const [cx, cy] = warpGroupCenter(idxs);
+  const a = (deg * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+  warpSnapshot();
+  for (const i of idxs) { const dx = warp.corners[i][0] - cx, dy = warp.corners[i][1] - cy; warp.corners[i] = [cx + dx * ca - dy * sa, cy + dx * sa + dy * ca]; }
+  pushWarp();
+}
+function warpFlip(horizontal) {
+  const idxs = warp.sel.length ? warp.sel : [0, 1, 2, 3];
+  const [cx, cy] = warpGroupCenter(idxs);
+  warpSnapshot();
+  for (const i of idxs) { if (horizontal) warp.corners[i][0] = 2 * cx - warp.corners[i][0]; else warp.corners[i][1] = 2 * cy - warp.corners[i][1]; }
+  pushWarp();
+}
+function warpUndo() { if (!warp.undo.length) return; warp.redo.push(JSON.stringify(warp.corners)); warp.corners = JSON.parse(warp.undo.pop()); pushWarp(); updateWarpButtons(); }
+function warpRedo() { if (!warp.redo.length) return; warp.undo.push(JSON.stringify(warp.corners)); warp.corners = JSON.parse(warp.redo.pop()); pushWarp(); updateWarpButtons(); }
 
 // ---- output (OSC / TUIO) --------------------------------------------------
 const out = { protocol: 'osc', host: '127.0.0.1', port: '7000', sendRate: '30', normalize: false };
@@ -408,6 +552,8 @@ function draw() {
   ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, 2 * Math.PI); ctx.fill();
   ctx.restore();
 
+  drawWarpOverlay(s);
+
   // stats
   frames++;
   fpsAccum += dt;
@@ -419,7 +565,54 @@ function draw() {
   $('pointCount').textContent = ui.streaming ? liveStats.points : '—';
   $('latency').textContent = ui.connected && liveStats.latency ? liveStats.latency.toFixed(0) : '—';
 
+  drawMonitor();
   requestAnimationFrame(draw);
+}
+
+// Output monitor: the mapping in normalized 0–1 space (what TouchDesigner receives).
+function drawMonitor() {
+  const mc = $('monitor');
+  if (!mc || ui.tab !== 'warp') return; // only render when visible
+  const mctx = mc.__ctx || (mc.__ctx = mc.getContext('2d'));
+  const w = mc.clientWidth, h = mc.clientHeight, d = Math.min(window.devicePixelRatio || 1, 2);
+  if (mc.width !== w * d || mc.height !== h * d) { mc.width = w * d; mc.height = h * d; }
+  mctx.setTransform(d, 0, 0, d, 0, 0);
+  mctx.fillStyle = '#000'; mctx.fillRect(0, 0, w, h);
+  const pad = 14, GW = w - 2 * pad, GH = h - 2 * pad;
+  const m = (u, v) => [pad + u * GW, pad + v * GH];
+  // 0–1 grid
+  mctx.strokeStyle = 'rgba(255,255,255,0.08)'; mctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    let a = m(i / 4, 0), b = m(i / 4, 1); mctx.beginPath(); mctx.moveTo(a[0], a[1]); mctx.lineTo(b[0], b[1]); mctx.stroke();
+    a = m(0, i / 4); b = m(1, i / 4); mctx.beginPath(); mctx.moveTo(a[0], a[1]); mctx.lineTo(b[0], b[1]); mctx.stroke();
+  }
+  mctx.strokeStyle = 'rgba(0,229,255,0.5)'; mctx.lineWidth = 1.5; mctx.strokeRect(pad, pad, GW, GH);
+  // registration corner targets
+  [[0, 0], [1, 0], [1, 1], [0, 1]].forEach((c) => {
+    const [x, y] = m(c[0], c[1]);
+    mctx.strokeStyle = '#00e5ff'; mctx.lineWidth = 1.2;
+    mctx.beginPath(); mctx.arc(x, y, 5, 0, 2 * Math.PI); mctx.stroke();
+    mctx.beginPath(); mctx.moveTo(x - 7, y); mctx.lineTo(x + 7, y); mctx.moveTo(x, y - 7); mctx.lineTo(x, y + 7); mctx.stroke();
+  });
+  const [cx, cy] = m(0.5, 0.5);
+  mctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  mctx.beginPath(); mctx.moveTo(cx - 6, cy); mctx.lineTo(cx + 6, cy); mctx.moveTo(cx, cy - 6); mctx.lineTo(cx, cy + 6); mctx.stroke();
+  // zones through H
+  for (const z of zones) {
+    if (!z.visible) continue;
+    mctx.beginPath();
+    z.pts.forEach((p, i) => { const [u, v] = applyH(warp.H, p[0], p[1]); const [x, y] = m(u, v); i ? mctx.lineTo(x, y) : mctx.moveTo(x, y); });
+    mctx.closePath();
+    mctx.fillStyle = z.occupied ? 'rgba(0,229,255,0.18)' : 'rgba(0,229,255,0.06)'; mctx.fill();
+    mctx.strokeStyle = 'rgba(0,229,255,0.6)'; mctx.lineWidth = 1; mctx.stroke();
+  }
+  // tracked points (normalized), clipped to the mapped area
+  for (const t of tracks) {
+    if (t.u == null || t.u < 0 || t.u > 1 || t.v < 0 || t.v > 1) continue;
+    const [x, y] = m(t.u, t.v);
+    mctx.fillStyle = t.color || '#00e5ff';
+    mctx.beginPath(); mctx.arc(x, y, 4, 0, 2 * Math.PI); mctx.fill();
+  }
 }
 
 // ---- device list rendering ------------------------------------------------
@@ -674,22 +867,54 @@ function wireControls() {
   }, { passive: false });
 
   let dragging = false, lastX = 0, lastY = 0;
+  let warpDrag = false, warpLast = null;
   wrap.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     const r = wrap.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
     if (ui.tool === 'zone') {
-      const [wx, wy] = stw(e.clientX - r.left, e.clientY - r.top);
+      const [wx, wy] = stw(mx, my);
       draft.push([wx, wy]);
       $('draftCount').textContent = draft.length + ' pts';
       return;
     }
+    if (warpInteractive()) {
+      let hit = -1;
+      warp.corners.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); if (Math.hypot(sx - mx, sy - my) <= 10) hit = i; });
+      if (hit >= 0) {
+        if (warp.sel.indexOf(hit) < 0) warp.sel = e.shiftKey ? warp.sel.concat(hit) : [hit];
+        warpDrag = true; warpLast = stw(mx, my); warpSnapshot(); updateWarpSel();
+      } else {
+        if (!e.shiftKey) warp.sel = [];
+        warp.marquee = { x0: mx, y0: my, x1: mx, y1: my }; updateWarpSel();
+      }
+      return;
+    }
     dragging = true; lastX = e.clientX; lastY = e.clientY;
   });
-  window.addEventListener('mouseup', () => (dragging = false));
+  window.addEventListener('mouseup', (e) => {
+    if (warpDrag) { warpDrag = false; pushWarp(); }
+    if (warp.marquee) {
+      const m = warp.marquee;
+      const x0 = Math.min(m.x0, m.x1), x1 = Math.max(m.x0, m.x1), y0 = Math.min(m.y0, m.y1), y1 = Math.max(m.y0, m.y1);
+      const sel = e.shiftKey ? warp.sel.slice() : [];
+      warp.corners.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1 && sel.indexOf(i) < 0) sel.push(i); });
+      warp.sel = sel; warp.marquee = null; updateWarpSel();
+    }
+    dragging = false;
+  });
   wrap.addEventListener('mousemove', (e) => {
     const r = wrap.getBoundingClientRect();
-    const [wx, wy] = stw(e.clientX - r.left, e.clientY - r.top);
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const [wx, wy] = stw(mx, my);
     $('cursor').textContent = `x ${wx.toFixed(2)}  y ${wy.toFixed(2)}`;
+    if (warpDrag) {
+      const dx = wx - warpLast[0], dy = wy - warpLast[1];
+      for (const i of warp.sel) { warp.corners[i][0] += dx; warp.corners[i][1] += dy; }
+      warpLast = [wx, wy]; recomputeWarp();
+      return;
+    }
+    if (warp.marquee) { warp.marquee.x1 = mx; warp.marquee.y1 = my; return; }
     if (dragging) {
       view.panX += e.clientX - lastX;
       view.panY += e.clientY - lastY;
@@ -725,6 +950,41 @@ function wireControls() {
   $('oscPort').onchange = () => { out.port = $('oscPort').value; pushOutput(); };
   updateOscPreview();
   updatePill();
+
+  // warp
+  $('warpToggle').onclick = () => setWarpEnabled(!warp.enabled);
+  $('warpSelectAll').onclick = () => { warp.sel = [0, 1, 2, 3]; updateWarpSel(); };
+  $('warpClear').onclick = () => { warp.sel = []; updateWarpSel(); };
+  $('warpUndo').onclick = warpUndo;
+  $('warpRedo').onclick = warpRedo;
+  $('warpRotStep').onchange = () => { warp.rotStep = parseFloat($('warpRotStep').value) || 15; };
+  $('warpRotCCW').onclick = () => warpRotate(-warp.rotStep);
+  $('warpRotCW').onclick = () => warpRotate(warp.rotStep);
+  $('warpFlipH').onclick = () => warpFlip(true);
+  $('warpFlipV').onclick = () => warpFlip(false);
+  $('warpDragBtn').onclick = () => setTool('warp');
+  $('warpReset').onclick = () => { warpSnapshot(); warp.corners = [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]]; warp.sel = []; updateWarpSel(); pushWarp(); };
+  renderCornerInputs();
+  updateWarpSel();
+  updateWarpButtons();
+
+  // output mode (action wired in step 8)
+  document.querySelectorAll('[data-omode]').forEach((b) => {
+    b.onclick = () => {
+      const mode = b.getAttribute('data-omode');
+      document.querySelectorAll('[data-omode]').forEach((x) => x.classList.toggle('active', x === b));
+      $('ndiConfig').style.display = mode === 'ndi' ? 'flex' : 'none';
+      $('outputAction').textContent = mode === 'window' ? 'OPEN OUTPUT WINDOW' : mode === 'extended' ? 'OPEN ON EXTENDED DISPLAY' : 'START NDI STREAM';
+    };
+  });
+
+  // keyboard: warp undo/redo
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) warpRedo(); else warpUndo();
+    }
+  });
   $('drawNewZone').onclick = () => { switchTab('zones'); setTool('zone'); };
 
   $('protoPill').onclick = () => switchTab('output');

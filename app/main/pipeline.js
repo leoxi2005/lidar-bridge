@@ -14,6 +14,7 @@
 const NBINS = 720; // 0.5° resolution
 
 const DEG = Math.PI / 180;
+const { computeH, applyH } = require('./homography');
 
 // tracking parameters (README: ε≈0.30 m, minPts≈3, max-jump ≈0.6 m)
 const CLUSTER_EPS = 0.3;
@@ -103,6 +104,17 @@ class Pipeline {
 
     // trigger zones: [{ name, slug, pts:[[x,y],...] }]
     this.zones = [];
+
+    // warp (corner-pin homography): source corners (metres) -> unit square
+    this.warpCorners = [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]];
+    this.warpEnabled = false;
+    this.warpH = computeH(this.warpCorners);
+  }
+
+  setWarp(patch) {
+    if (patch.corners) this.warpCorners = patch.corners;
+    if (patch.enabled !== undefined) this.warpEnabled = !!patch.enabled;
+    this.warpH = computeH(this.warpCorners);
   }
 
   setZones(zones) {
@@ -224,16 +236,22 @@ class Pipeline {
       bgCaptured: this.bgCaptured,
       capturing,
       zoneOcc,
-      tracks: this.tracks.map((t) => ({
-        id: t.id,
-        x: t.x,
-        y: t.y,
-        vx: t.vx,
-        vy: t.vy,
-        vel: Math.hypot(t.vx, t.vy),
-        color: t.color,
-        zone: t.zone || '',
-      })),
+      tracks: this.tracks.map((t) => {
+        const [u, v] = applyH(this.warpH, t.x, t.y);
+        return {
+          id: t.id,
+          x: t.x,
+          y: t.y,
+          u,
+          v,
+          out: u < 0 || u > 1 || v < 0 || v > 1, // outside the mapped area
+          vx: t.vx,
+          vy: t.vy,
+          vel: Math.hypot(t.vx, t.vy),
+          color: t.color,
+          zone: t.zone || '',
+        };
+      }),
     };
 
     // baseline contour (world metres) for the orange dashed ghost outline
