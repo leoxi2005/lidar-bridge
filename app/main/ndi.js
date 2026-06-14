@@ -7,6 +7,7 @@
 // no swizzle or flip needed.
 
 const koffi = require('koffi');
+const path = require('path');
 
 // Struct type registrations are global (independent of which lib we load).
 koffi.struct('NDIlib_send_create_t', {
@@ -36,18 +37,28 @@ const FRAME_FORMAT_PROGRESSIVE = 1;
 
 function libCandidates() {
   const p = process.platform;
+  // directories next to the executable (drop the runtime here = no system install)
+  const exeDir = path.dirname(process.execPath);
+  const appDirs = [exeDir, process.resourcesPath || exeDir, process.cwd()];
   if (p === 'win32') {
     const list = [];
     for (const v of ['NDI_RUNTIME_DIR_V6', 'NDI_RUNTIME_DIR_V5', 'NDI_RUNTIME_DIR_V4']) {
       if (process.env[v]) list.push(process.env[v].replace(/\\$/, '') + '\\Processing.NDI.Lib.x64.dll');
     }
+    for (const d of appDirs) list.push(path.join(d, 'Processing.NDI.Lib.x64.dll'));
     list.push('Processing.NDI.Lib.x64.dll'); // on PATH after install
     return list;
   }
   if (p === 'darwin') {
-    return ['/usr/local/lib/libndi.dylib', '/usr/local/lib/libndi.4.dylib', '/opt/homebrew/lib/libndi.dylib', 'libndi.dylib'];
+    const list = [];
+    for (const d of appDirs) list.push(path.join(d, 'libndi.dylib'));
+    list.push('/usr/local/lib/libndi.dylib', '/usr/local/lib/libndi.4.dylib', '/opt/homebrew/lib/libndi.dylib', 'libndi.dylib');
+    return list;
   }
-  return ['libndi.so', 'libndi.so.5', 'libndi.so.4', '/usr/lib/libndi.so'];
+  const list = [];
+  for (const d of appDirs) list.push(path.join(d, 'libndi.so'));
+  list.push('libndi.so', 'libndi.so.5', 'libndi.so.4', '/usr/lib/libndi.so');
+  return list;
 }
 
 class NdiSender {
