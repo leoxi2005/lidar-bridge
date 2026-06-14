@@ -10,7 +10,7 @@ const { applyH } = require('./homography');
 
 // In dev (`npm start`) the app menu / About / Dock default to "Electron".
 // Set the real product name so it shows "LiDAR Bridge" everywhere.
-app.setName('LiDAR Bridge');
+app.setName('LEOXI-LIDARTRACKING');
 // Use our icon for the Dock in dev (packaged builds get it from electron-builder).
 if (process.platform === 'darwin' && app.dock) {
   try { app.dock.setIcon(path.join(__dirname, '..', 'build', 'icon.png')); } catch (_) {}
@@ -74,7 +74,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 680,
     backgroundColor: '#0a0b0e',
-    title: 'LiDAR Bridge',
+    title: 'LEOXI-LIDARTRACKING',
     show: !process.env.LIDAR_AUTOSHOT,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
@@ -134,7 +134,7 @@ function broadcastProjectorFrame(payload) {
 function openProjector(mode) {
   if (projWin && !projWin.isDestroyed()) { projWin.focus(); return; }
   const o = {
-    width: 960, height: 600, frame: false, backgroundColor: '#000', title: 'LiDAR Bridge — Output',
+    width: 960, height: 600, frame: false, backgroundColor: '#000', title: 'LEOXI-LIDARTRACKING — Output',
     webPreferences: { preload: path.join(__dirname, '..', 'projector-preload.js'), contextIsolation: true, nodeIntegration: false },
   };
   if (mode === 'extended') {

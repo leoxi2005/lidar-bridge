@@ -1,7 +1,9 @@
 name: Build Windows
 
 # Builds the Windows .exe (installer + portable) on a cloud Windows runner — so you
-# can produce a Windows build from a Mac-only machine. Run it from the GitHub
+# can produce a Windows build from a Mac-only machine. It also downloads the NDI
+# runtime and bundles Processing.NDI.Lib.x64.dll into the app, so NDI out works on
+# the target Windows PC with NO separate NDI install. Run it from the GitHub
 # "Actions" tab (Run workflow) or on every push, then download the artifact.
 
 on:
@@ -21,6 +23,36 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Fetch & bundle NDI runtime DLL
+        shell: pwsh
+        run: |
+          # If the DLL is already committed, keep it; otherwise install the NDI
+          # runtime silently and copy the DLL out so electron-builder bundles it.
+          if (Test-Path "ndi-runtime/win/Processing.NDI.Lib.x64.dll") {
+            Write-Host "NDI DLL already present in repo — using it."
+          } else {
+            $exe = "$env:RUNNER_TEMP\ndi_runtime.exe"
+            $urls = @("http://ndi.link/NDIRedistV6",
+                      "https://downloads.ndi.tv/Redist/NDI%206%20Runtime.exe")
+            $ok = $false
+            foreach ($u in $urls) {
+              try { Write-Host "Downloading $u"; Invoke-WebRequest -Uri $u -OutFile $exe -UseBasicParsing -MaximumRedirection 5; $ok = $true; break }
+              catch { Write-Host "  failed: $($_.Exception.Message)" }
+            }
+            if (-not $ok) { Write-Error "Could not download the NDI runtime installer"; exit 1 }
+            Write-Host "Installing NDI runtime silently..."
+            # NSIS installers use /S; Inno uses /VERYSILENT — pass both, the wrong one is ignored.
+            Start-Process -FilePath $exe -ArgumentList "/S","/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+            Start-Sleep -Seconds 5
+            $dll = Get-ChildItem -Path "C:\Program Files\NDI","C:\Program Files (x86)\NDI" -Recurse -Filter "Processing.NDI.Lib.x64.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $dll) { $dll = Get-ChildItem -Path "C:\Program Files" -Recurse -Filter "Processing.NDI.Lib.x64.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 }
+            if (-not $dll) { Write-Error "NDI DLL not found after install"; exit 1 }
+            New-Item -ItemType Directory -Force -Path "ndi-runtime/win" | Out-Null
+            Copy-Item $dll.FullName "ndi-runtime/win/Processing.NDI.Lib.x64.dll" -Force
+            Write-Host "Bundled NDI DLL from: $($dll.FullName)"
+          }
+
       - name: Install dependencies
         run: npm install
       - name: Build Windows installer + portable
@@ -28,7 +60,7 @@ jobs:
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: lidar-bridge-windows
+          name: leoxi-lidartracking-windows
           path: |
             app/dist/*.exe
           if-no-files-found: error
