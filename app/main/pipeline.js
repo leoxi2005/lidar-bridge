@@ -91,6 +91,10 @@ class Pipeline {
       placement: { x: 0, y: 0, rot: 0 },
       bgSubtract: false,
       bgTol: 0.18, // metres
+      smooth: true, // one-euro position smoothing
+      smoothMin: 1.0, // mincutoff (lower = smoother but more lag)
+      smoothBeta: 0.4, // speed coefficient (higher = less lag when moving fast)
+      smoothDcutoff: 1.0,
     };
     // per-bin scratch reused each scan
     this._dist = new Float32Array(NBINS); // metres, 0 = empty
@@ -132,6 +136,12 @@ class Pipeline {
     if (patch.distMax !== undefined) this.cfg.distMax = parseFloat(patch.distMax) || 25;
     if (patch.bgSubtract !== undefined) this.cfg.bgSubtract = !!patch.bgSubtract;
     if (patch.bgTol !== undefined) this.cfg.bgTol = parseFloat(patch.bgTol) || 0.18;
+    if (patch.smooth !== undefined) this.cfg.smooth = !!patch.smooth;
+    if (patch.smoothAmount !== undefined) {
+      // 0 = light (responsive), 1 = heavy (smooth): map to mincutoff 3.0 -> 0.3 Hz
+      const a = Math.max(0, Math.min(1, parseFloat(patch.smoothAmount)));
+      this.cfg.smoothMin = 3.0 - a * 2.7;
+    }
     if (patch.placement) {
       this.cfg.placement = {
         x: parseFloat(patch.placement.x) || 0,
@@ -318,11 +328,14 @@ class Pipeline {
       if (best >= 0) {
         const b = blobs[best];
         used.add(best);
+        // one-euro smoothing on position (reduces jitter, stays responsive when moving)
+        const sx = this.cfg.smooth ? this._oneEuro(t, 'x', b.x, dt) : b.x;
+        const sy = this.cfg.smooth ? this._oneEuro(t, 'y', b.y, dt) : b.y;
         if (dt > 0) {
-          t.vx = 0.6 * t.vx + 0.4 * ((b.x - t.x) / dt);
-          t.vy = 0.6 * t.vy + 0.4 * ((b.y - t.y) / dt);
+          t.vx = 0.6 * t.vx + 0.4 * ((sx - t.x) / dt);
+          t.vy = 0.6 * t.vy + 0.4 * ((sy - t.y) / dt);
         }
-        t.x = b.x; t.y = b.y; t.r = b.r; t.missed = 0; t.hits++;
+        t.x = sx; t.y = sy; t.r = b.r; t.missed = 0; t.hits++;
         if (!t.id && t.hits >= CONFIRM_HITS) {
           t.id = String(++this._nextId).padStart(2, '0');
           t.color = TRACK_PALETTE[(this._nextId - 1) % TRACK_PALETTE.length];
@@ -336,6 +349,24 @@ class Pipeline {
       this.tracks.push({ id: null, color: null, x: b.x, y: b.y, r: b.r, vx: 0, vy: 0, missed: 0, hits: 1 });
     });
     this.tracks = this.tracks.filter((t) => t.missed < MAX_MISSED);
+  }
+
+  // One-euro filter (per track, per axis). Adaptive low-pass: smooths when still,
+  // tracks quickly when moving.
+  _oneEuro(t, ax, x, dt) {
+    if (!(dt > 0)) return x;
+    const st = t._oe || (t._oe = {});
+    const s = st[ax] || (st[ax] = { xPrev: x, dxPrev: 0, init: false });
+    const alpha = (cutoff) => { const tau = 1 / (2 * Math.PI * cutoff); return 1 / (1 + tau / dt); };
+    if (!s.init) { s.init = true; s.xPrev = x; s.dxPrev = 0; return x; }
+    const dx = (x - s.xPrev) / dt;
+    const ad = alpha(this.cfg.smoothDcutoff);
+    const edx = ad * dx + (1 - ad) * s.dxPrev;
+    const cutoff = this.cfg.smoothMin + this.cfg.smoothBeta * Math.abs(edx);
+    const a = alpha(cutoff);
+    const fx = a * x + (1 - a) * s.xPrev;
+    s.xPrev = fx; s.dxPrev = edx;
+    return fx;
   }
 
   // confirmed tracks only (have a public id)

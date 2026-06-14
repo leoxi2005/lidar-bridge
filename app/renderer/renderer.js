@@ -811,6 +811,16 @@ function loadConnFields(id) {
   pushPlacement();
 }
 
+const smoothing = { on: true, amount: 0.5 };
+function pushSmooth() {
+  window.lidar.setConfig({ smooth: smoothing.on, smoothAmount: smoothing.amount });
+  $('smoothKnob').style.left = smoothing.on ? '24px' : '2px';
+  $('smoothKnob').style.background = smoothing.on ? '#39ff7a' : '#717a84';
+  $('smoothToggle').style.borderColor = smoothing.on ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.12)';
+  $('smoothToggle').style.background = smoothing.on ? 'rgba(57,255,122,0.12)' : '#0e1216';
+  $('smoothLabel').textContent = smoothing.amount.toFixed(2);
+}
+
 function pushPlacement() {
   const placement = {
     x: parseFloat($('posX').value) || 0,
@@ -976,6 +986,9 @@ function wireControls() {
     setBgSubtract(false);
     syncBgUi(false, false);
   };
+
+  $('smoothToggle').onclick = () => { smoothing.on = !smoothing.on; pushSmooth(); };
+  $('smoothAmt').oninput = () => { smoothing.amount = parseFloat($('smoothAmt').value); pushSmooth(); };
 
   $('autoLevel').onclick = () => {
     $('posX').value = '0.00'; $('posY').value = '0.00'; $('rot').value = '0.0';
@@ -1298,6 +1311,7 @@ function boot() {
   $('selName').textContent = SENSORS.find((s) => s.id === ui.selected).name;
   renderDevices();
   wireControls();
+  pushSmooth();
   refreshPorts();
 
   window.lidar.onScan(ingestScan);
@@ -1320,6 +1334,7 @@ window.__collectPreset = function () {
     distMin: $('distMin').value, distMax: $('distMax').value,
     placement: { x: $('posX').value, y: $('posY').value, rot: $('rot').value },
     bg: { subtract: bg.subtract, tol: bg.tol, captured: bg.captured },
+    smoothing: { on: smoothing.on, amount: smoothing.amount },
     zones: zones.map(function (z) { return { name: z.name, slug: z.slug, pts: z.pts, visible: z.visible }; }),
     warp: { corners: warp.corners, enabled: warp.enabled, rotStep: warp.rotStep },
     out: { protocol: out.protocol, host: out.host, port: out.port, sendRate: out.sendRate, format: out.format, normalize: out.normalize },
@@ -1351,6 +1366,7 @@ window.__applyPreset = function (o) {
     syncBgUi(!!o.bg.captured, false);
     setBgSubtract(!!o.bg.subtract);
   }
+  if (o.smoothing) { smoothing.on = !!o.smoothing.on; smoothing.amount = parseFloat(o.smoothing.amount); if (isNaN(smoothing.amount)) smoothing.amount = 0.5; $('smoothAmt').value = smoothing.amount; pushSmooth(); }
   if (o.zones) { zones = o.zones.map(function (z) { return { name: z.name, slug: z.slug, pts: z.pts, visible: z.visible !== false, occupied: false }; }); pushZones(); renderZoneCards(); }
   if (o.warp) {
     warp.corners = o.warp.corners; warp.rotStep = o.warp.rotStep || 15;

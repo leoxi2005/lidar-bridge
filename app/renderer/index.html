@@ -225,6 +225,23 @@ select.input{ padding:0 6px; }
         </div>
         <button id="autoLevel" class="prim" style="border-color:rgba(0,229,255,0.25);background:rgba(0,229,255,0.06);color:#9fe4ef">AUTO-LEVEL FLOOR PLANE</button>
       </div>
+
+      <div style="padding:14px 14px 8px" class="sec-title">TRACKING</div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:7px;background:#10141a;border:1px solid var(--border)">
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <span style="font-weight:600;font-size:11.5px;color:#dbe1e8">Smooth tracks</span>
+            <span class="mono" style="font-size:9px;color:#5b636d">one-euro · giảm rung</span>
+          </div>
+          <button id="smoothToggle" style="width:46px;height:26px;border-radius:20px;border:1px solid rgba(57,255,122,0.5);background:rgba(57,255,122,0.12);cursor:pointer;position:relative;padding:0;flex:0 0 auto">
+            <span id="smoothKnob" style="position:absolute;top:2px;left:24px;width:20px;height:20px;border-radius:50%;background:#39ff7a;transition:left .15s ease"></span>
+          </button>
+        </div>
+        <label class="field" style="gap:5px">
+          <div style="display:flex;justify-content:space-between"><span class="lbl">STRENGTH</span><span class="mono" id="smoothLabel" style="font-size:9.5px;color:#9fe4ef">0.50</span></div>
+          <input id="smoothAmt" type="range" min="0" max="1" step="0.05" value="0.5" style="width:100%;accent-color:#39ff7a">
+        </label>
+      </div>
       <div style="height:14px;flex:0 0 auto"></div>
     </div>
 
