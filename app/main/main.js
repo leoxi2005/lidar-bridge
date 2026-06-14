@@ -10,6 +10,8 @@ const { applyH } = require('./homography');
 
 let projWin = null; // projector output window
 let ndi = null; // NDI sender (optional, requires grandiose + NDI SDK)
+let syServer = null; // Syphon server (macOS only, optional node-syphon)
+let syWin = null; // offscreen window rendering the mapping for Syphon
 
 // record / playback of raw scan sessions
 let recording = false;
@@ -49,7 +51,11 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
-  win.on('closed', () => (win = null));
+  win.on('closed', () => {
+    win = null;
+    stopSyphon();
+    if (projWin && !projWin.isDestroyed()) projWin.close();
+  });
   if (process.env.LIDAR_AUTOSHOT) runAutoShot();
 }
 
@@ -73,17 +79,21 @@ function onScan(nodes) {
     zones: pipeline.zones.map((z, i) => ({ slug: z.slug, on: !!frame.zoneOcc[i] })),
   };
 
-  if (projWin && !projWin.isDestroyed()) {
-    projWin.webContents.send('projector:frame', {
-      warpEnabled: pipeline.warpEnabled,
-      tracks: frame.tracks.map((t) => ({ u: t.u, v: t.v, out: t.out, color: t.color, id: t.id })),
-      zones: pipeline.zones.map((z, i) => ({
-        name: z.name,
-        occupied: !!frame.zoneOcc[i],
-        uv: z.pts.map((p) => applyH(pipeline.warpH, p[0], p[1])),
-      })),
-    });
-  }
+  broadcastProjectorFrame({
+    warpEnabled: pipeline.warpEnabled,
+    tracks: frame.tracks.map((t) => ({ u: t.u, v: t.v, out: t.out, color: t.color, id: t.id })),
+    zones: pipeline.zones.map((z, i) => ({
+      name: z.name,
+      occupied: !!frame.zoneOcc[i],
+      uv: z.pts.map((p) => applyH(pipeline.warpH, p[0], p[1])),
+    })),
+  });
+}
+
+// Send a frame to every output surface (visible projector window + offscreen Syphon render).
+function broadcastProjectorFrame(payload) {
+  if (projWin && !projWin.isDestroyed()) projWin.webContents.send('projector:frame', payload);
+  if (syWin && !syWin.isDestroyed()) syWin.webContents.send('projector:frame', payload);
 }
 
 // ---- projector output window ---------------------------------------------
@@ -107,6 +117,56 @@ function openProjector(mode) {
 
 ipcMain.on('projector:exit', () => { if (projWin && !projWin.isDestroyed()) projWin.close(); });
 ipcMain.on('projector:fullscreen', () => { if (projWin && !projWin.isDestroyed()) projWin.setFullScreen(!projWin.isFullScreen()); });
+
+// ---- Syphon output (macOS) -----------------------------------------------
+// Renders the clean mapping in an offscreen window and publishes each painted
+// frame to a Syphon server, so TouchDesigner can receive it via "Syphon Spout In".
+function startSyphon(cfg) {
+  if (process.platform !== 'darwin') return { ok: false, error: 'Syphon is macOS-only. On Windows use NDI Tools / OBS to capture the OUTPUT window.' };
+  let Syphon;
+  try { Syphon = require('node-syphon'); } catch (e) { return { ok: false, error: 'node-syphon not installed.' }; }
+  stopSyphon();
+  const W = parseInt(cfg.w, 10) || 1280;
+  const H = parseInt(cfg.h, 10) || 720;
+  syWin = new BrowserWindow({
+    show: false, width: W, height: H,
+    webPreferences: {
+      offscreen: true,
+      preload: path.join(__dirname, '..', 'projector-preload.js'),
+      contextIsolation: true, nodeIntegration: false,
+    },
+  });
+  syWin.loadFile(path.join(__dirname, '..', 'renderer', 'projector.html'), { search: 'clean=1' });
+  syWin.webContents.setFrameRate(parseInt(cfg.fps, 10) || 30);
+  try {
+    syServer = new Syphon.SyphonOpenGLServer(cfg.name || 'LidarBridge-Mapping');
+  } catch (e) {
+    stopSyphon();
+    return { ok: false, error: 'Syphon server failed: ' + e.message };
+  }
+  syWin.webContents.on('paint', (_e, _dirty, image) => {
+    if (!syServer) return;
+    const size = image.getSize();
+    const bmp = image.getBitmap(); // BGRA, top-left origin
+    try {
+      syServer.publishImageData(
+        new Uint8ClampedArray(bmp.buffer, bmp.byteOffset, bmp.byteLength),
+        { x: 0, y: 0, width: size.width, height: size.height },
+        { width: size.width, height: size.height },
+        true, // flip to GL bottom-left origin
+        'GL_TEXTURE_2D'
+      );
+    } catch (err) { /* ignore per-frame errors */ }
+  });
+  return { ok: true };
+}
+function stopSyphon() {
+  if (syServer) { try { syServer.dispose && syServer.dispose(); } catch (_) {} syServer = null; }
+  if (syWin && !syWin.isDestroyed()) syWin.close();
+  syWin = null;
+}
+ipcMain.handle('lidar:syphon-start', async (_e, cfg) => startSyphon(cfg || {}));
+ipcMain.handle('lidar:syphon-stop', async () => { stopSyphon(); return { ok: true }; });
 
 // ---- network output -------------------------------------------------------
 function startSender() {

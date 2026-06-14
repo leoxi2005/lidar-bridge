@@ -128,5 +128,11 @@ window.projector.onFrame((f) => {
   $('warpPill').firstElementChild.style.background = on ? '#00e5ff' : '#5b636d';
 });
 
+// clean mode (used by the off-screen Syphon/NDI render): no chrome, no grid
+if (new URLSearchParams(location.search).has('clean')) {
+  opts.grid = false; opts.labels = false; opts.chrome = false;
+  applyChrome(); setBtn('bGrid', false); setBtn('bLabels', false);
+}
+
 resize();
 requestAnimationFrame(draw);

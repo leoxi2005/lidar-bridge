@@ -19,6 +19,9 @@
   "dependencies": {
     "serialport": "^12.0.0"
   },
+  "optionalDependencies": {
+    "node-syphon": "^1.5.0"
+  },
   "build": {
     "appId": "com.lidarbridge.app",
     "productName": "LiDAR Bridge",
@@ -33,10 +36,14 @@
     "asarUnpack": [
       "**/node_modules/serialport/**",
       "**/node_modules/@serialport/**",
+      "**/node_modules/node-syphon/**",
       "**/*.node"
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "nsis": {
@@ -44,7 +51,9 @@
       "allowToChangeInstallationDirectory": true
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.utilities"
     }
   }

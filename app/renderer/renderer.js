@@ -358,6 +358,7 @@ function warpRedo() { if (!warp.redo.length) return; warp.undo.push(JSON.stringi
 let outputMode = 'window';
 let projectorOpen = false;
 let ndiOn = false;
+let syphonOn = false;
 const ndiCfg = { name: 'LidarBridge-Mapping', w: '1920', h: '1080', fps: '60', fit: 'fit' };
 
 function buildNdiConfig() {
@@ -403,6 +404,7 @@ function buildNdiConfig() {
 function updateOutputAction() {
   const btn = $('outputAction');
   if (outputMode === 'ndi') { btn.textContent = ndiOn ? 'STOP NDI STREAM' : 'START NDI STREAM'; }
+  else if (outputMode === 'syphon') { btn.textContent = syphonOn ? 'STOP SYPHON' : 'START SYPHON'; }
   else if (outputMode === 'extended') { btn.textContent = projectorOpen ? 'CLOSE OUTPUT' : 'OPEN ON EXTENDED DISPLAY'; }
   else { btn.textContent = projectorOpen ? 'CLOSE OUTPUT' : 'OPEN OUTPUT WINDOW'; }
 }
@@ -413,6 +415,16 @@ async function doOutputAction() {
     else {
       const res = await window.lidar.ndiStart(ndiCfg);
       if (res.ok) { ndiOn = true; $('ndiBadge').style.display = 'flex'; }
+      else { setConnStatus(res.error, '#ffb000'); }
+    }
+    updateOutputAction();
+    return;
+  }
+  if (outputMode === 'syphon') {
+    if (syphonOn) { await window.lidar.syphonStop(); syphonOn = false; $('ndiBadge').style.display = 'none'; }
+    else {
+      const res = await window.lidar.syphonStart(ndiCfg);
+      if (res.ok) { syphonOn = true; $('ndiBadge').style.display = 'flex'; setConnStatus('Syphon server "' + ndiCfg.name + '" started', '#39ff7a'); }
       else { setConnStatus(res.error, '#ffb000'); }
     }
     updateOutputAction();
@@ -1121,11 +1133,16 @@ function wireControls() {
 
   // output mode + action
   buildNdiConfig();
+  // Syphon is macOS-only — hide the button elsewhere
+  if (window.lidar.platform !== 'darwin') {
+    const sb = document.querySelector('[data-omode="syphon"]');
+    if (sb) sb.style.display = 'none';
+  }
   document.querySelectorAll('[data-omode]').forEach((b) => {
     b.onclick = () => {
       outputMode = b.getAttribute('data-omode');
       document.querySelectorAll('[data-omode]').forEach((x) => x.classList.toggle('active', x === b));
-      $('ndiConfig').style.display = outputMode === 'ndi' ? 'flex' : 'none';
+      $('ndiConfig').style.display = (outputMode === 'ndi' || outputMode === 'syphon') ? 'flex' : 'none';
       updateOutputAction();
     };
   });
