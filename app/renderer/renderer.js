@@ -70,6 +70,17 @@ const trails = new Map(); // id -> [[x,y], ...] motion trail
 let zones = []; // [{ name, slug, pts:[[x,y]], visible, occupied }]
 let draft = []; // world points of the zone being drawn (polygon, click-by-click)
 let draftRect = null; // [[x0,y0],[x1,y1]] live rectangle preview while dragging
+let selectedZone = -1; // index of zone being edited (Select tool)
+let zoneBbox = null; // screen-space resize handles of the selected zone
+
+function pipR(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
 
 // ---- homography (mirrors main/homography.js) ------------------------------
 function hSolve(A, b, n) {
@@ -161,23 +172,40 @@ function renderZoneCards() {
   list.innerHTML = '';
   zones.forEach((z, i) => {
     const card = document.createElement('div');
-    const border = z.occupied ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)';
-    card.style.cssText = `padding:10px 11px;border-radius:8px;background:#10141a;border:1px solid ${border};display:flex;flex-direction:column;gap:8px`;
+    const sel = i === selectedZone;
+    const border = sel ? '#00e5ff' : (z.occupied ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)');
+    card.style.cssText = `padding:10px 11px;border-radius:8px;background:#10141a;border:1px solid ${border};display:flex;flex-direction:column;gap:8px;cursor:pointer`;
+    card.onclick = (e) => { if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') { selectedZone = i; renderZoneCards(); } };
     card.innerHTML =
       `<div style="display:flex;align-items:center;gap:9px">
          <button class="zone-eye" data-i="${i}" title="visibility" style="width:22px;height:22px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:${z.visible ? 'rgba(0,229,255,0.12)' : '#0e1216'};color:${z.visible ? '#a9e8f1' : '#5b636d'};cursor:pointer;font-size:11px;padding:0;display:flex;align-items:center;justify-content:center;flex:0 0 auto">${z.visible ? '◉' : '○'}</button>
-         <span style="flex:1;font-weight:600;font-size:12.5px;color:#dbe1e8">${z.name}</span>
+         <input class="zone-name" data-i="${i}" value="${z.name}" style="flex:1;min-width:0;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,0.08);font-weight:600;font-size:12.5px;color:#dbe1e8;font-family:inherit;padding:2px 0">
          <span class="zone-badge" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 8px;border-radius:20px;background:${z.occupied ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.05)'};color:${z.occupied ? '#bff3fb' : '#717a84'}">${z.occupied ? 'TRIGGERED' : 'IDLE'}</span>
+         <button class="zone-del" data-i="${i}" title="delete" style="width:22px;height:22px;border-radius:5px;border:1px solid rgba(255,77,94,0.3);background:rgba(255,77,94,0.07);color:#ff9aa6;cursor:pointer;font-size:13px;padding:0;flex:0 0 auto">×</button>
        </div>
        <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5b636d">
          <span>${z.pts.length} vertices</span><span style="color:#717a84">/lidar/zone/${z.slug}</span>
        </div>`;
     list.appendChild(card);
   });
-  list.querySelectorAll('.zone-eye').forEach((b) => {
-    b.onclick = () => { const i = +b.getAttribute('data-i'); zones[i].visible = !zones[i].visible; renderZoneCards(); };
+  list.querySelectorAll('.zone-eye').forEach((b) => { b.onclick = () => { const i = +b.getAttribute('data-i'); zones[i].visible = !zones[i].visible; renderZoneCards(); }; });
+  list.querySelectorAll('.zone-del').forEach((b) => { b.onclick = () => deleteZone(+b.getAttribute('data-i')); });
+  list.querySelectorAll('.zone-name').forEach((inp) => {
+    inp.onchange = () => {
+      const i = +inp.getAttribute('data-i');
+      zones[i].name = inp.value.trim() || zones[i].name;
+      zones[i].slug = slugify(zones[i].name);
+      pushZones(); renderZoneCards();
+    };
   });
   $('zoneEmpty').style.display = zones.length ? 'none' : 'block';
+}
+
+function deleteZone(i) {
+  zones.splice(i, 1);
+  if (selectedZone === i) selectedZone = -1;
+  else if (selectedZone > i) selectedZone--;
+  pushZones(); renderZoneCards();
 }
 
 function updateZoneBadges() {
@@ -550,6 +578,32 @@ function draw() {
     ctx.font = "600 11px 'IBM Plex Mono', monospace";
     ctx.textAlign = 'center';
     ctx.fillText(z.name.toUpperCase(), cx, cy);
+  }
+
+  // selected zone: highlight + bounding-box resize handles (Select tool)
+  zoneBbox = null;
+  if (selectedZone >= 0 && zones[selectedZone] && ui.tool === 'select') {
+    const z = zones[selectedZone];
+    ctx.beginPath();
+    z.pts.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+    ctx.closePath();
+    ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2; ctx.stroke();
+    const xs = z.pts.map((p) => p[0]), ys = z.pts.map((p) => p[1]);
+    const bx0 = Math.min.apply(null, xs), bx1 = Math.max.apply(null, xs);
+    const by0 = Math.min.apply(null, ys), by1 = Math.max.apply(null, ys);
+    const bcw = [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]];
+    const q = bcw.map((p) => wts(p[0], p[1]));
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+    ctx.beginPath(); q.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+    const cenx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, ceny = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+    const OFF = 14;
+    zoneBbox = bcw.map((cw, i) => {
+      let hx = q[i][0], hy = q[i][1]; const vx = hx - cenx, vy = hy - ceny, L = Math.hypot(vx, vy) || 1;
+      hx += (vx / L) * OFF; hy += (vy / L) * OFF;
+      const aw = [cw[0] === bx0 ? bx1 : bx0, cw[1] === by0 ? by1 : by0];
+      return { sx: hx, sy: hy, cw, aw };
+    });
+    for (const h of zoneBbox) { ctx.fillStyle = '#fff'; ctx.fillRect(h.sx - 4, h.sy - 4, 8, 8); ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.5; ctx.strokeRect(h.sx - 4, h.sy - 4, 8, 8); }
   }
 
   // captured background baseline (orange dashed ghost outline)
@@ -1022,6 +1076,7 @@ function wireControls() {
   let dragging = false, lastX = 0, lastY = 0;
   let warpDrag = null, warpScale = null; // warpDrag = { origin:[wx,wy], starts:{i:[x,y]} }
   let zoneStart = null, zoneDragging = false, zoneMoved = false;
+  let zoneMove = null, zoneResize = null; // editing an existing zone (Select tool)
   wrap.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     const r = wrap.getBoundingClientRect();
@@ -1059,9 +1114,32 @@ function wireControls() {
       }
       return;
     }
+    // SELECT tool: edit existing zones (resize handle / move / select / deselect)
+    if (ui.tool === 'select') {
+      const [wx, wy] = stw(mx, my);
+      if (selectedZone >= 0 && zoneBbox) {
+        for (const h of zoneBbox) {
+          if (Math.hypot(h.sx - mx, h.sy - my) <= 8) {
+            zoneResize = { anchor: h.aw.slice(), ref: h.cw.slice(), snap: zones[selectedZone].pts.map((p) => p.slice()) };
+            return;
+          }
+        }
+      }
+      let hit = -1;
+      for (let i = zones.length - 1; i >= 0; i--) {
+        if (zones[i].visible !== false && pipR(wx, wy, zones[i].pts)) { hit = i; break; }
+      }
+      if (hit >= 0) {
+        selectedZone = hit; renderZoneCards();
+        zoneMove = { start: [wx, wy], orig: zones[hit].pts.map((p) => p.slice()) };
+        return;
+      }
+      if (selectedZone >= 0) { selectedZone = -1; renderZoneCards(); }
+    }
     dragging = true; lastX = e.clientX; lastY = e.clientY;
   });
   window.addEventListener('mouseup', (e) => {
+    if (zoneMove || zoneResize) { zoneMove = null; zoneResize = null; pushZones(); return; }
     if (ui.tool === 'zone' && zoneDragging) {
       zoneDragging = false;
       if (zoneMoved && draftRect) {
@@ -1101,6 +1179,20 @@ function wireControls() {
         zoneMoved = true;
         draftRect = [zoneStart, [wx, wy]];
       }
+      return;
+    }
+    if (zoneMove && selectedZone >= 0) {
+      const dx = wx - zoneMove.start[0], dy = wy - zoneMove.start[1];
+      zones[selectedZone].pts = zoneMove.orig.map((p) => [p[0] + dx, p[1] + dy]);
+      return;
+    }
+    if (zoneResize && selectedZone >= 0) {
+      const rx = (wx - zoneResize.anchor[0]) / ((zoneResize.ref[0] - zoneResize.anchor[0]) || 1e-6);
+      const ry = (wy - zoneResize.anchor[1]) / ((zoneResize.ref[1] - zoneResize.anchor[1]) || 1e-6);
+      zones[selectedZone].pts = zoneResize.snap.map((p) => [
+        zoneResize.anchor[0] + (p[0] - zoneResize.anchor[0]) * rx,
+        zoneResize.anchor[1] + (p[1] - zoneResize.anchor[1]) * ry,
+      ]);
       return;
     }
     if (warpScale) {
@@ -1208,6 +1300,10 @@ function wireControls() {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
       if (e.shiftKey) warpRedo(); else warpUndo();
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedZone >= 0 && document.activeElement && document.activeElement.tagName !== 'INPUT') {
+      e.preventDefault();
+      deleteZone(selectedZone);
     }
   });
   $('drawNewZone').onclick = () => { switchTab('zones'); setTool('zone'); };
