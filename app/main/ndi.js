@@ -37,9 +37,12 @@ const FRAME_FORMAT_PROGRESSIVE = 1;
 
 function libCandidates() {
   const p = process.platform;
-  // directories next to the executable (drop the runtime here = no system install)
+  // directories next to the executable / resources (drop the runtime here = no install),
+  // plus the project's ndi-runtime/<plat> folder so `npm start` (dev) finds it too.
   const exeDir = path.dirname(process.execPath);
-  const appDirs = [exeDir, process.resourcesPath || exeDir, process.cwd()];
+  const plat = p === 'win32' ? 'win' : p === 'darwin' ? 'mac' : 'linux';
+  const appDirs = [exeDir, process.resourcesPath || exeDir, process.cwd(),
+    path.join(__dirname, '..', 'ndi-runtime', plat)];
   if (p === 'win32') {
     const list = [];
     for (const v of ['NDI_RUNTIME_DIR_V6', 'NDI_RUNTIME_DIR_V5', 'NDI_RUNTIME_DIR_V4']) {
