@@ -7,7 +7,7 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('proj');
 const ctx = canvas.getContext('2d');
 let frame = { tracks: [], zones: [], warpEnabled: false };
-const opts = { grid: true, labels: true, test: false, chrome: true, bright: 1 };
+const opts = { grid: true, labels: true, test: false, chrome: true, bright: 1, scale: 'stretch' };
 
 function resize() {
   const d = Math.min(window.devicePixelRatio || 1, 2);
@@ -24,9 +24,18 @@ function draw() {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = opts.bright;
 
-  // FILL: map 0–1 across the whole window so the mapped field covers the projector
-  // edge-to-edge at the screen's own aspect ratio (u → full width, v → full height).
-  const m = (u, v) => [u * W, v * H];
+  // Map normalized 0–1 → screen per scale mode. The 0–1 space is treated as square:
+  //   stretch = fill window (distort to screen aspect)
+  //   fit     = preserve square, letterbox (whole field visible)
+  //   fill    = preserve square, cover window (crop overflow)
+  let m;
+  if (opts.scale === 'stretch') {
+    m = (u, v) => [u * W, v * H];
+  } else {
+    const side = opts.scale === 'fill' ? Math.max(W, H) : Math.min(W, H);
+    const ox = (W - side) / 2, oy = (H - side) / 2;
+    m = (u, v) => [ox + u * side, oy + v * side];
+  }
 
   if (opts.test) {
     // test pattern: concentric + diagonal
@@ -46,7 +55,8 @@ function draw() {
   // calibration chrome (border, registration targets, centre crosshair) — only when
   // GRID is on. Turn GRID off for a clean "mapped content only" projector feed.
   if (opts.grid) {
-    ctx.strokeStyle = 'rgba(0,229,255,0.6)'; ctx.lineWidth = 1.5; ctx.strokeRect(1, 1, W - 2, H - 2);
+    const b0 = m(0, 0), b1 = m(1, 1);
+    ctx.strokeStyle = 'rgba(0,229,255,0.6)'; ctx.lineWidth = 1.5; ctx.strokeRect(b0[0], b0[1], b1[0] - b0[0], b1[1] - b0[1]);
     [[0, 0], [1, 0], [1, 1], [0, 1]].forEach((c) => {
       const [x, y] = m(c[0], c[1]);
       ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.4;
@@ -86,6 +96,12 @@ function draw() {
 function setBtn(id, on) { $(id).classList.toggle('on', on); }
 function applyChrome() { $('topChrome').classList.toggle('hidden', !opts.chrome); $('botChrome').classList.toggle('hidden', !opts.chrome); }
 
+const SCALES = ['stretch', 'fit', 'fill'];
+function cycleScale() {
+  opts.scale = SCALES[(SCALES.indexOf(opts.scale) + 1) % SCALES.length];
+  $('bScale').textContent = opts.scale.toUpperCase() + ' (A)';
+}
+$('bScale').onclick = cycleScale;
 $('bGrid').onclick = () => { opts.grid = !opts.grid; setBtn('bGrid', opts.grid); };
 $('bLabels').onclick = () => { opts.labels = !opts.labels; setBtn('bLabels', opts.labels); };
 $('bTest').onclick = () => { opts.test = !opts.test; setBtn('bTest', opts.test); };
@@ -96,7 +112,8 @@ $('bright').oninput = () => { opts.bright = parseFloat($('bright').value); };
 
 window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
-  if (k === 'g') $('bGrid').click();
+  if (k === 'a') cycleScale();
+  else if (k === 'g') $('bGrid').click();
   else if (k === 'l') $('bLabels').click();
   else if (k === 't') $('bTest').click();
   else if (k === 'h') $('bHide').click();
