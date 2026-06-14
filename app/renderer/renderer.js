@@ -68,7 +68,8 @@ const bg = { captured: false, subtract: false, tol: 0.18, contour: null, show: t
 let tracks = [];
 const trails = new Map(); // id -> [[x,y], ...] motion trail
 let zones = []; // [{ name, slug, pts:[[x,y]], visible, occupied }]
-let draft = []; // world points of the zone being drawn
+let draft = []; // world points of the zone being drawn (polygon, click-by-click)
+let draftRect = null; // [[x0,y0],[x1,y1]] live rectangle preview while dragging
 
 // ---- homography (mirrors main/homography.js) ------------------------------
 function hSolve(A, b, n) {
@@ -195,6 +196,7 @@ function updateZoneBadges() {
 function setTool(tool) {
   ui.tool = tool;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-tool') === tool));
+  draftRect = null;
   if (tool === 'zone') { draft = []; $('draftBanner').style.display = 'flex'; $('draftCount').textContent = '0 pts'; }
   else { draft = []; $('draftBanner').style.display = 'none'; }
 }
@@ -652,6 +654,17 @@ function draw() {
     ctx.fillText(label, bx + 0.36 * s + 7, by - 0.5 * s + 2.5);
   }
 
+  // rectangle zone being dragged (live preview)
+  if (draftRect) {
+    const [a, b] = draftRect;
+    const p0 = wts(a[0], a[1]), p1 = wts(b[0], b[1]);
+    const x = Math.min(p0[0], p1[0]), y = Math.min(p0[1], p1[1]);
+    const w = Math.abs(p1[0] - p0[0]), h = Math.abs(p1[1] - p0[1]);
+    ctx.fillStyle = 'rgba(0,229,255,0.08)'; ctx.fillRect(x, y, w, h);
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(0,229,255,0.9)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+  }
+
   // zone being drawn (dashed)
   if (draft.length) {
     ctx.strokeStyle = 'rgba(0,229,255,0.9)';
@@ -995,14 +1008,17 @@ function wireControls() {
 
   let dragging = false, lastX = 0, lastY = 0;
   let warpDrag = null, warpScale = null; // warpDrag = { origin:[wx,wy], starts:{i:[x,y]} }
+  let zoneStart = null, zoneDragging = false, zoneMoved = false;
   wrap.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     const r = wrap.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     if (ui.tool === 'zone') {
-      const [wx, wy] = stw(mx, my);
-      draft.push([wx, wy]);
-      $('draftCount').textContent = draft.length + ' pts';
+      // record the press; on release: a click adds a polygon point, a drag makes a rectangle
+      zoneStart = stw(mx, my);
+      zoneDragging = true;
+      zoneMoved = false;
+      draftRect = null;
       return;
     }
     if (warpInteractive()) {
@@ -1033,6 +1049,24 @@ function wireControls() {
     dragging = true; lastX = e.clientX; lastY = e.clientY;
   });
   window.addEventListener('mouseup', (e) => {
+    if (ui.tool === 'zone' && zoneDragging) {
+      zoneDragging = false;
+      if (zoneMoved && draftRect) {
+        // drag -> rectangle zone (4 corners)
+        const [a, b] = draftRect;
+        const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
+        const y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+        addZone([[x0, y1], [x1, y1], [x1, y0], [x0, y0]]);
+        draft = []; draftRect = null;
+        setTool('select');
+      } else if (zoneStart) {
+        // click -> add a polygon vertex (FINISH to complete)
+        draft.push(zoneStart);
+        $('draftCount').textContent = draft.length + ' pts';
+      }
+      zoneStart = null;
+      return;
+    }
     if (warpScale) { warpScale = null; pushWarp(); }
     if (warpDrag) { warpDrag = null; warp._snap = null; pushWarp(); }
     if (warp.marquee) {
@@ -1049,6 +1083,13 @@ function wireControls() {
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     const [wx, wy] = stw(mx, my);
     $('cursor').textContent = `x ${wx.toFixed(2)}  y ${wy.toFixed(2)}`;
+    if (ui.tool === 'zone' && zoneDragging) {
+      if (Math.hypot(wx - zoneStart[0], wy - zoneStart[1]) > 0.12) {
+        zoneMoved = true;
+        draftRect = [zoneStart, [wx, wy]];
+      }
+      return;
+    }
     if (warpScale) {
       const rx = (wx - warpScale.anchor[0]) / ((warpScale.ref[0] - warpScale.anchor[0]) || 1e-6);
       const ry = (wy - warpScale.anchor[1]) / ((warpScale.ref[1] - warpScale.anchor[1]) || 1e-6);
