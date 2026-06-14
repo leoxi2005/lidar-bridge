@@ -80,7 +80,11 @@ class NdiSender {
     this._destroy = this.lib.func('void NDIlib_send_destroy(void *)');
 
     if (!init()) throw new Error('NDIlib_initialize() failed');
-    this.inst = this._create({ p_ndi_name: name || 'LidarBridge', p_groups: null, clock_video: true, clock_audio: false });
+    // clock_video MUST be false: when true, NDIlib_send_send_video_v2 *sleeps* inside
+    // the call to pace frames to the rate — and we call it synchronously on the main
+    // thread, which stalls the scan/OSC loop (latency spikes to ~2x). We already pace
+    // via webContents.setFrameRate(fps) on the offscreen window, so let send() return now.
+    this.inst = this._create({ p_ndi_name: name || 'LidarBridge', p_groups: null, clock_video: false, clock_audio: false });
     if (!this.inst) throw new Error('NDIlib_send_create() failed');
     this.fps = parseInt(fps, 10) || 30;
   }
