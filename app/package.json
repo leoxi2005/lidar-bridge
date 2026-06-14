@@ -47,14 +47,17 @@
         "portable"
       ],
       "icon": "build/icon.png",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "extraResources": [
         { "from": "ndi-runtime/win", "to": ".", "filter": ["*.dll"] }
       ]
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
