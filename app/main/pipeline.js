@@ -109,6 +109,7 @@ class Pipeline {
 
     // trigger zones: [{ name, slug, pts:[[x,y],...] }]
     this.zones = [];
+    this._zoneRT = new Map(); // slug -> { since } for dwell timing
 
     // warp (corner-pin homography): source corners (metres) -> unit square
     this.warpCorners = [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]];
@@ -236,18 +237,23 @@ class Pipeline {
     const blobs = this._clusterBlobs(fgPts);
     this._updateTracks(blobs, dtSec);
 
-    // ZONES: point-in-polygon occupancy per zone (confirmed tracks only).
+    // ZONES: per-zone people count, occupancy, dwell time (confirmed tracks only).
     const confirmed = this.confirmedTracks();
-    const zoneOcc = this.zones.map(() => false);
+    const nowMs = Date.now();
     for (const t of confirmed) t.zone = '';
-    this.zones.forEach((z, zi) => {
+    const zoneInfo = this.zones.map((z) => {
+      let cnt = 0;
       for (const t of confirmed) {
-        if (pointInPoly(t.x, t.y, z.pts)) {
-          zoneOcc[zi] = true;
-          if (!t.zone) t.zone = z.name;
-        }
+        if (pointInPoly(t.x, t.y, z.pts)) { cnt++; if (!t.zone) t.zone = z.name; }
       }
+      const on = cnt > 0;
+      let rt = this._zoneRT.get(z.slug);
+      if (!rt) { rt = { since: 0 }; this._zoneRT.set(z.slug, rt); }
+      if (on && !rt.since) rt.since = nowMs;
+      if (!on) rt.since = 0;
+      return { slug: z.slug, name: z.name, on, count: cnt, dwell: rt.since ? (nowMs - rt.since) / 1000 : 0 };
     });
+    const zoneOcc = zoneInfo.map((z) => z.on);
 
     const frame = {
       pts,
@@ -256,6 +262,7 @@ class Pipeline {
       bgCaptured: this.bgCaptured,
       capturing,
       zoneOcc,
+      zoneInfo,
       tracks: confirmed.map((t) => {
         const [u, v] = applyH(this.warpH, t.x, t.y);
         return {

@@ -41,6 +41,22 @@ let sendTimer = null;
 let tuioFseq = 0;
 let lastLogAt = 0;
 let latestOut = { tracks: [], zones: [] };
+const zonePrevOn = new Map(); // slug -> last sent occupancy (for enter/exit pulses)
+
+// Emit per-zone OSC: state, count, dwell, and enter/exit pulses on transitions.
+function sendZones(lines) {
+  for (const z of latestOut.zones) {
+    const base = '/lidar/zone/' + z.slug;
+    sender.sendMessage(base, [{ type: 'i', value: z.on ? 1 : 0 }]);
+    sender.sendMessage(base + '/count', [{ type: 'i', value: z.count || 0 }]);
+    sender.sendMessage(base + '/dwell', [{ type: 'f', value: z.dwell || 0 }]);
+    const prev = zonePrevOn.get(z.slug) || false;
+    if (z.on && !prev) sender.sendMessage(base + '/enter', [{ type: 'i', value: 1 }]);
+    if (!z.on && prev) sender.sendMessage(base + '/exit', [{ type: 'i', value: 1 }]);
+    zonePrevOn.set(z.slug, z.on);
+    if (lines) lines.push(base + '  ' + (z.on ? 1 : 0) + '  n=' + (z.count || 0) + '  d=' + (z.dwell || 0).toFixed(1) + 's');
+  }
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -83,7 +99,7 @@ function onScan(nodes) {
 
   latestOut = {
     tracks: frame.tracks,
-    zones: pipeline.zones.map((z, i) => ({ slug: z.slug, on: !!frame.zoneOcc[i] })),
+    zones: frame.zoneInfo || [],
   };
 
   broadcastProjectorFrame({
@@ -225,7 +241,7 @@ function emitOutput() {
       sender.sendMessage(`/lidar/p${i}/v`, [{ type: 'f', value: t.vel || 0 }]);
       sender.sendMessage(`/lidar/p${i}/id`, [{ type: 'i', value: parseInt(t.id, 10) }]);
     }
-    for (const z of latestOut.zones) sender.sendMessage(`/lidar/zone/${z.slug}`, [{ type: 'i', value: z.on ? 1 : 0 }]);
+    sendZones(lines);
     lines.push(`/lidar/count  ${ts.length}`);
     ts.slice(0, 4).forEach((t, i) => { const [a, b] = coord(t); lines.push(`/lidar/p${i}  on 1  ${a.toFixed(2)} ${b.toFixed(2)}  v${(t.vel || 0).toFixed(2)}  id${t.id}`); });
     for (const z of latestOut.zones) lines.push(`/lidar/zone/${z.slug}  ${z.on ? 1 : 0}`);

@@ -143,13 +143,12 @@ function ingestScan(frame) {
   updateTrails(tracks);
   renderTrackTable(tracks);
 
-  if (frame.zoneOcc) {
-    let changed = false;
-    for (let i = 0; i < zones.length; i++) {
-      const o = !!frame.zoneOcc[i];
-      if (zones[i].occupied !== o) { zones[i].occupied = o; changed = true; }
+  if (frame.zoneInfo) {
+    for (let i = 0; i < zones.length && i < frame.zoneInfo.length; i++) {
+      const info = frame.zoneInfo[i];
+      zones[i].occupied = info.on; zones[i].count = info.count; zones[i].dwell = info.dwell;
     }
-    if (changed) updateZoneBadges();
+    updateZoneBadges();
   }
 }
 
@@ -214,10 +213,11 @@ function updateZoneBadges() {
     const badge = cards[i].querySelector('.zone-badge');
     if (!badge) continue;
     const o = zones[i].occupied;
-    badge.textContent = o ? 'TRIGGERED' : 'IDLE';
+    const c = zones[i].count || 0;
+    badge.textContent = o ? ('TRIGGERED · ' + c) : 'IDLE';
     badge.style.background = o ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.05)';
     badge.style.color = o ? '#bff3fb' : '#717a84';
-    cards[i].style.borderColor = o ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)';
+    if (i !== selectedZone) cards[i].style.borderColor = o ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)';
   }
 }
 
@@ -479,7 +479,7 @@ function updateOscPreview() {
   const pre = $('oscPreview');
   const c = out.normalize ? 'u  v' : 'x  y';
   if (out.protocol === 'tuio') pre.textContent = '/tuio/2Dobj set <s> <c> ' + (out.normalize ? 'u v' : 'x y') + ' …\n/tuio/2Dobj alive […]  +  fseq <n>';
-  else pre.textContent = '/lidar/count  <n>\n/lidar/p0/on  /lidar/p0/x  /lidar/p0/y  /lidar/p0/v  /lidar/p0/id\n… p0..pN (auto-sized slots) · /lidar/zone/<slug> 0|1';
+  else pre.textContent = '/lidar/count <n> · /lidar/pN/{on,x,y,v,id}\n/lidar/zone/<slug>  0|1 · /count · /dwell · /enter · /exit';
 }
 function appendOscLog(lines) {
   const mon = $('oscMonitor');
