@@ -25,6 +25,13 @@ let source = null; // active RPLidar | Simulator
 const pipeline = new Pipeline();
 let lastScanAt = 0;
 
+// auto-reconnect watchdog (real hardware)
+let lastConnectCfg = null;
+let autoReconnect = false;
+let reconnecting = false;
+let watchdog = null;
+const STALL_MS = 2500; // no scans for this long -> assume lost, reconnect
+
 // network output
 const sender = new OscSender();
 let outCfg = { protocol: 'osc', host: '127.0.0.1', port: 7000, sendRate: 30, normalize: false, format: 'slots' };
@@ -275,6 +282,42 @@ function wireSource(src) {
   src.on('error', (err) => send('lidar:status', 'ERROR: ' + err.message));
 }
 
+// ---- auto-reconnect watchdog ---------------------------------------------
+function startWatchdog() {
+  stopWatchdog();
+  watchdog = setInterval(() => {
+    if (!autoReconnect || reconnecting || !source) return;
+    if (lastScanAt && Date.now() - lastScanAt > STALL_MS) doReconnect();
+  }, 1000);
+}
+function stopWatchdog() {
+  if (watchdog) clearInterval(watchdog);
+  watchdog = null;
+}
+async function doReconnect() {
+  if (!autoReconnect || reconnecting || !lastConnectCfg) return;
+  reconnecting = true;
+  send('lidar:status', 'signal lost — reconnecting…');
+  send('lidar:conn', { state: 'reconnecting' });
+  while (autoReconnect && win && !win.isDestroyed()) {
+    try {
+      if (source) { source.removeAllListeners(); try { await source.disconnect(); } catch (_) {} source = null; }
+      source = new RPLidar();
+      wireSource(source);
+      await source.connect({ path: lastConnectCfg.comPort, baudRate: parseInt(lastConnectCfg.baudrate, 10) || 115200 });
+      lastScanAt = Date.now();
+      startSender();
+      send('lidar:status', 'reconnected');
+      send('lidar:conn', { state: 'connected' });
+      break;
+    } catch (e) {
+      send('lidar:status', 'reconnect failed, retrying… (' + e.message + ')');
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  reconnecting = false;
+}
+
 async function teardownSource() {
   stopSender();
   if (source) {
@@ -304,6 +347,7 @@ ipcMain.handle('lidar:list-ports', async () => {
 });
 
 ipcMain.handle('lidar:connect', async (_evt, config) => {
+  autoReconnect = false; reconnecting = false; stopWatchdog(); // clean slate
   await teardownSource();
   pipeline.setConfig({
     quality: config.quality,
@@ -335,6 +379,10 @@ ipcMain.handle('lidar:connect', async (_evt, config) => {
       baudRate: parseInt(config.baudrate, 10) || 115200,
     });
     startSender();
+    // arm auto-reconnect for real hardware
+    lastConnectCfg = { comPort: config.comPort, baudrate: config.baudrate };
+    autoReconnect = true;
+    startWatchdog();
     return { ok: true, simulated: false, info };
   } catch (e) {
     await teardownSource();
@@ -343,6 +391,9 @@ ipcMain.handle('lidar:connect', async (_evt, config) => {
 });
 
 ipcMain.handle('lidar:disconnect', async () => {
+  autoReconnect = false; // user-initiated -> don't auto-reconnect
+  reconnecting = false;
+  stopWatchdog();
   await teardownSource();
   return { ok: true };
 });
