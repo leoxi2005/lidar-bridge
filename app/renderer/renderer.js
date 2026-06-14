@@ -266,6 +266,16 @@ function drawWarpOverlay(s) {
     for (const h of warp._bbox) { ctx.fillStyle = '#fff'; ctx.fillRect(h.sx - 4, h.sy - 4, 8, 8); ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.5; ctx.strokeRect(h.sx - 4, h.sy - 4, 8, 8); }
   } else { warp._bbox = null; }
 
+  // snap indicator (green ring on the wall point a corner is locking onto)
+  if (warp._snap) {
+    const [sx, sy] = wts(warp._snap[0], warp._snap[1]);
+    ctx.strokeStyle = '#39ff7a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx, sy, 12, 0, 2 * Math.PI); ctx.stroke();
+    ctx.fillStyle = '#39ff7a';
+    ctx.font = "600 9px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center';
+    ctx.fillText('SNAP', sx, sy - 16);
+  }
+
   // marquee
   if (warp.marquee) {
     const m = warp.marquee, x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1), w = Math.abs(m.x1 - m.x0), h = Math.abs(m.y1 - m.y0);
@@ -330,17 +340,15 @@ function warpFlip(horizontal) {
   for (const i of idxs) { if (horizontal) warp.corners[i][0] = 2 * cx - warp.corners[i][0]; else warp.corners[i][1] = 2 * cy - warp.corners[i][1]; }
   pushWarp();
 }
-// Snap a single corner onto the nearest point-cloud point (a wall return) within
-// `maxD` metres — makes it easy to land a corner exactly on a wall corner.
-function snapCornerToCloud(i, maxD = 0.3) {
-  let bestX = 0, bestY = 0, bestD = maxD, found = false;
+// Nearest point-cloud point (a wall/object return) to (px,py) within maxD metres.
+function findNearestCloud(px, py, maxD = 0.4) {
+  let best = null, bestD = maxD;
   for (const b of bins) {
     if (!b) continue;
-    const d = Math.hypot(b.x - warp.corners[i][0], b.y - warp.corners[i][1]);
-    if (d < bestD) { bestD = d; bestX = b.x; bestY = b.y; found = true; }
+    const d = Math.hypot(b.x - px, b.y - py);
+    if (d < bestD) { bestD = d; best = [b.x, b.y]; }
   }
-  if (found) warp.corners[i] = [bestX, bestY];
-  return found;
+  return best;
 }
 
 function warpUndo() { if (!warp.undo.length) return; warp.redo.push(JSON.stringify(warp.corners)); warp.corners = JSON.parse(warp.undo.pop()); pushWarp(); updateWarpButtons(); }
@@ -1014,10 +1022,7 @@ function wireControls() {
   });
   window.addEventListener('mouseup', (e) => {
     if (warpScale) { warpScale = null; pushWarp(); }
-    if (warpDrag) {
-      if (warp.sel.length === 1) snapCornerToCloud(warp.sel[0]); // snap single corner to a wall point
-      warpDrag = null; pushWarp();
-    }
+    if (warpDrag) { warpDrag = null; warp._snap = null; pushWarp(); }
     if (warp.marquee) {
       const m = warp.marquee;
       const x0 = Math.min(m.x0, m.x1), x1 = Math.max(m.x0, m.x1), y0 = Math.min(m.y0, m.y1), y1 = Math.max(m.y0, m.y1);
@@ -1049,6 +1054,13 @@ function wireControls() {
         const s = warpDrag.starts[i];
         warp.corners[i][0] = s[0] + dx;
         warp.corners[i][1] = s[1] + dy;
+      }
+      // magnetic snap to a wall point when dragging a single corner (not while axis-locking)
+      warp._snap = null;
+      if (warp.sel.length === 1 && !e.shiftKey) {
+        const i = warp.sel[0];
+        const t = findNearestCloud(warp.corners[i][0], warp.corners[i][1], 0.4);
+        if (t) { warp.corners[i] = [t[0], t[1]]; warp._snap = t; }
       }
       pushWarpLive();
       return;

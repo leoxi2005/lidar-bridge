@@ -1,0 +1,33 @@
+name: Build macOS
+
+# Builds the macOS .dmg on a cloud macOS runner. (You can also just run
+# `npm run dist:mac` locally since you're on a Mac — this is for convenience /
+# a clean machine.) Download the artifact from the Actions run.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["**"]
+    paths: ["app/**", ".github/workflows/build-macos.yml"]
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Build macOS dmg
+        run: npm run dist:mac
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: lidar-bridge-macos
+          path: app/dist/*.dmg
+          if-no-files-found: error

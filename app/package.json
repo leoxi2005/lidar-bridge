@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac dmg",
     "dist:win": "electron-builder --win nsis portable",
     "list-ports": "node -e \"require('@serialport/bindings-cpp').autoDetect().list().then(p=>console.log(p))\""
   },
