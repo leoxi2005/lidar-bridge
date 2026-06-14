@@ -149,12 +149,13 @@ function startSyphon(cfg) {
     const size = image.getSize();
     const bmp = image.getBitmap(); // Electron is BGRA; Syphon expects RGBA -> swizzle R/B
     const n = bmp.length;
+    // fast swizzle: one 32-bit op per pixel (swap byte0<->byte2, keep G/A)
     const rgba = new Uint8ClampedArray(n);
-    for (let i = 0; i < n; i += 4) {
-      rgba[i] = bmp[i + 2];
-      rgba[i + 1] = bmp[i + 1];
-      rgba[i + 2] = bmp[i];
-      rgba[i + 3] = bmp[i + 3];
+    const src32 = new Uint32Array(bmp.buffer, bmp.byteOffset, n >> 2);
+    const out32 = new Uint32Array(rgba.buffer);
+    for (let i = 0; i < src32.length; i++) {
+      const p = src32[i];
+      out32[i] = (p & 0xff00ff00) | ((p & 0x000000ff) << 16) | ((p & 0x00ff0000) >> 16);
     }
     try {
       syServer.publishImageData(
@@ -467,6 +468,10 @@ async function runAutoShot() {
     }
     let target = win;
     if (process.env.LIDAR_SHOT_PROJ && projWin && !projWin.isDestroyed()) target = projWin;
+    try {
+      const lat = await win.webContents.executeJavaScript("document.getElementById('latency').textContent");
+      console.log('LATENCY_MS ' + lat);
+    } catch (_) { /* ignore */ }
     const img = await target.webContents.capturePage();
     fs.writeFileSync(out, img.toPNG());
     console.log('SHOT_SAVED ' + out);

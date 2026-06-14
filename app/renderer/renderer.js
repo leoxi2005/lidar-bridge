@@ -359,7 +359,7 @@ let outputMode = 'window';
 let projectorOpen = false;
 let ndiOn = false;
 let syphonOn = false;
-const ndiCfg = { name: 'LidarBridge-Mapping', w: '1920', h: '1080', fps: '60', fit: 'fit' };
+const ndiCfg = { name: 'LidarBridge-Mapping', w: '1280', h: '720', fps: '30', fit: 'fit' };
 
 function buildNdiConfig() {
   const box = $('ndiConfig');
@@ -369,7 +369,7 @@ function buildNdiConfig() {
        <label class="field" style="flex:1"><span class="lbl">WIDTH</span><input id="ndiW" class="input" value="${ndiCfg.w}"></label>
        <label class="field" style="flex:1"><span class="lbl">HEIGHT</span><input id="ndiH" class="input" value="${ndiCfg.h}"></label>
        <label class="field" style="flex:1"><span class="lbl">FPS</span>
-         <div class="row"><button class="seg ndi-fps active" data-fps="60" style="font-size:9.5px">60</button><button class="seg ndi-fps" data-fps="30" style="font-size:9.5px">30</button></div>
+         <div class="row"><button class="seg ndi-fps" data-fps="60" style="font-size:9.5px">60</button><button class="seg ndi-fps active" data-fps="30" style="font-size:9.5px">30</button></div>
        </label>
      </div>
      <div style="display:flex;justify-content:space-between" class="mono"><span class="lbl">ASPECT</span><span id="ndiAspect" style="font-size:9.5px;color:#9fe4ef"></span></div>
