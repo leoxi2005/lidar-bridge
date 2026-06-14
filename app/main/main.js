@@ -25,7 +25,7 @@ let lastScanAt = 0;
 
 // network output
 const sender = new OscSender();
-let outCfg = { protocol: 'osc', host: '127.0.0.1', port: 7000, sendRate: 30, normalize: false, format: 'perid' };
+let outCfg = { protocol: 'osc', host: '127.0.0.1', port: 7000, sendRate: 30, normalize: false, format: 'slots' };
 const MAX_SLOTS = 64; // safety cap on instancing slots
 let peakSlots = 0; // high-water mark of concurrent tracks this session (auto-sizes the slot set)
 let sendTimer = null;
