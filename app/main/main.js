@@ -204,22 +204,23 @@ function emitOutput() {
   // for driving Geometry instancing in TouchDesigner. Empty slots send on=0.
   if (outCfg.protocol === 'osc' && outCfg.format === 'slots') {
     const ts = latestOut.tracks;
-    // grow the slot set to the busiest moment seen (never shrink → stable channels),
-    // so we don't hard-cap or waste channels far above the real count.
-    peakSlots = Math.min(MAX_SLOTS, Math.max(peakSlots, ts.length));
+    // Send ONLY the active tracks (no padding). The channel set is exactly the current
+    // count. NOTE: TouchDesigner's OSC In CHOP never forgets a channel it has seen, so
+    // after a busy moment higher slots linger with stale values — Trim/cull by
+    // /lidar/count in TD to keep exactly the active set.
     sender.sendMessage('/lidar/count', [{ type: 'i', value: ts.length }]);
-    for (let i = 0; i < peakSlots; i++) {
+    for (let i = 0; i < ts.length; i++) {
       const t = ts[i];
-      const [a, b] = t ? coord(t) : [0, 0];
-      sender.sendMessage(`/lidar/p${i}/on`, [{ type: 'i', value: t ? 1 : 0 }]);
+      const [a, b] = coord(t);
+      sender.sendMessage(`/lidar/p${i}/on`, [{ type: 'i', value: 1 }]);
       sender.sendMessage(`/lidar/p${i}/x`, [{ type: 'f', value: a }]);
       sender.sendMessage(`/lidar/p${i}/y`, [{ type: 'f', value: b }]);
-      sender.sendMessage(`/lidar/p${i}/v`, [{ type: 'f', value: t ? (t.vel || 0) : 0 }]);
-      sender.sendMessage(`/lidar/p${i}/id`, [{ type: 'i', value: t ? parseInt(t.id, 10) : 0 }]);
+      sender.sendMessage(`/lidar/p${i}/v`, [{ type: 'f', value: t.vel || 0 }]);
+      sender.sendMessage(`/lidar/p${i}/id`, [{ type: 'i', value: parseInt(t.id, 10) }]);
     }
     for (const z of latestOut.zones) sender.sendMessage(`/lidar/zone/${z.slug}`, [{ type: 'i', value: z.on ? 1 : 0 }]);
     lines.push(`/lidar/count  ${ts.length}`);
-    ts.slice(0, 3).forEach((t, i) => { const [a, b] = coord(t); lines.push(`/lidar/p${i}/{on,x,y,v,id}  1 ${a.toFixed(2)} ${b.toFixed(2)} ${(t.vel || 0).toFixed(2)} ${t.id}`); });
+    ts.slice(0, 4).forEach((t, i) => { const [a, b] = coord(t); lines.push(`/lidar/p${i}  on 1  ${a.toFixed(2)} ${b.toFixed(2)}  v${(t.vel || 0).toFixed(2)}  id${t.id}`); });
     for (const z of latestOut.zones) lines.push(`/lidar/zone/${z.slug}  ${z.on ? 1 : 0}`);
     const nowS = Date.now();
     if (lines.length && nowS - lastLogAt > 140) { lastLogAt = nowS; send('lidar:osc-log', lines); }
