@@ -24,11 +24,9 @@ function draw() {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = opts.bright;
 
-  // fit the 0–1 square into the window with margin, preserving aspect
-  const margin = 0.06 * Math.min(W, H);
-  const side = Math.min(W, H) - 2 * margin;
-  const ox = (W - side) / 2, oy = (H - side) / 2;
-  const m = (u, v) => [ox + u * side, oy + v * side];
+  // FILL: map 0–1 across the whole window so the mapped field covers the projector
+  // edge-to-edge at the screen's own aspect ratio (u → full width, v → full height).
+  const m = (u, v) => [u * W, v * H];
 
   if (opts.test) {
     // test pattern: concentric + diagonal
@@ -48,7 +46,7 @@ function draw() {
   // calibration chrome (border, registration targets, centre crosshair) — only when
   // GRID is on. Turn GRID off for a clean "mapped content only" projector feed.
   if (opts.grid) {
-    ctx.strokeStyle = 'rgba(0,229,255,0.6)'; ctx.lineWidth = 1.5; ctx.strokeRect(ox, oy, side, side);
+    ctx.strokeStyle = 'rgba(0,229,255,0.6)'; ctx.lineWidth = 1.5; ctx.strokeRect(1, 1, W - 2, H - 2);
     [[0, 0], [1, 0], [1, 1], [0, 1]].forEach((c) => {
       const [x, y] = m(c[0], c[1]);
       ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.4;
