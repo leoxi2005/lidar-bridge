@@ -17,6 +17,7 @@
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
+    "koffi": "^3.0.2",
     "serialport": "^12.0.0"
   },
   "optionalDependencies": {
@@ -37,6 +38,7 @@
       "**/node_modules/serialport/**",
       "**/node_modules/@serialport/**",
       "**/node_modules/node-syphon/**",
+      "**/node_modules/koffi/**",
       "**/*.node"
     ],
     "win": {

@@ -9,7 +9,8 @@ const { OscSender, oscMessage, oscBundle } = require('./osc');
 const { applyH } = require('./homography');
 
 let projWin = null; // projector output window
-let ndi = null; // NDI sender (optional, requires grandiose + NDI SDK)
+let ndiSender = null; // native NDI sender (koffi -> NDI runtime)
+let ndiWin = null; // offscreen window rendering the mapping for NDI
 let syServer = null; // Syphon server (macOS only, optional node-syphon)
 let syWin = null; // offscreen window rendering the mapping for Syphon
 
@@ -77,6 +78,7 @@ function createWindow() {
   win.on('closed', () => {
     win = null;
     stopSyphon();
+    stopNdi();
     if (projWin && !projWin.isDestroyed()) projWin.close();
   });
   if (process.env.LIDAR_AUTOSHOT) runAutoShot();
@@ -117,6 +119,7 @@ function onScan(nodes) {
 function broadcastProjectorFrame(payload) {
   if (projWin && !projWin.isDestroyed()) projWin.webContents.send('projector:frame', payload);
   if (syWin && !syWin.isDestroyed()) syWin.webContents.send('projector:frame', payload);
+  if (ndiWin && !ndiWin.isDestroyed()) ndiWin.webContents.send('projector:frame', payload);
 }
 
 // ---- projector output window ---------------------------------------------
@@ -492,21 +495,42 @@ ipcMain.handle('lidar:close-output', async () => {
   return { ok: true };
 });
 
-// NDI broadcast requires the NDI SDK + the native `grandiose` binding, which are not
-// bundled here. Load lazily and report cleanly if unavailable (no crash).
-ipcMain.handle('lidar:ndi-start', async (_evt, cfg) => {
+// Native NDI sender: off-screen render of the clean mapping -> NDI runtime (koffi).
+function startNdi(cfg) {
+  let NdiSender;
+  try { ({ NdiSender } = require('./ndi')); } catch (e) { return { ok: false, error: 'koffi unavailable: ' + e.message }; }
+  stopNdi();
+  const W = parseInt(cfg.w, 10) || 1280;
+  const H = parseInt(cfg.h, 10) || 720;
+  ndiSender = new NdiSender();
   try {
-    const grandiose = require('grandiose'); // optional dependency
-    ndi = await grandiose.send({ name: cfg.name || 'LidarBridge-Mapping' });
-    return { ok: true, active: true };
+    ndiSender.start(cfg.name || 'LidarBridge-Mapping', W, H, cfg.fps);
   } catch (e) {
-    return { ok: false, error: 'NDI broadcast needs the NDI SDK + `grandiose` native module (not installed in this build). WINDOW / EXTENDED output work without it.' };
+    ndiSender = null;
+    return { ok: false, error: e.message };
   }
-});
-ipcMain.handle('lidar:ndi-stop', async () => {
-  ndi = null;
+  const sf = (screen.getPrimaryDisplay().scaleFactor) || 1;
+  ndiWin = new BrowserWindow({
+    show: false, width: Math.max(1, Math.round(W / sf)), height: Math.max(1, Math.round(H / sf)),
+    webPreferences: { offscreen: true, preload: path.join(__dirname, '..', 'projector-preload.js'), contextIsolation: true, nodeIntegration: false },
+  });
+  ndiWin.loadFile(path.join(__dirname, '..', 'renderer', 'projector.html'), { search: 'clean=1' });
+  ndiWin.webContents.setFrameRate(parseInt(cfg.fps, 10) || 30);
+  ndiWin.webContents.on('paint', (_e, _dirty, image) => {
+    if (!ndiSender) return;
+    const size = image.getSize();
+    const bmp = image.getBitmap(); // BGRA top-down -> NDI BGRA directly
+    try { ndiSender.send(bmp, size.width, size.height); } catch (err) { /* ignore */ }
+  });
   return { ok: true };
-});
+}
+function stopNdi() {
+  if (ndiWin && !ndiWin.isDestroyed()) ndiWin.close();
+  ndiWin = null;
+  if (ndiSender) { ndiSender.stop(); ndiSender = null; }
+}
+ipcMain.handle('lidar:ndi-start', async (_evt, cfg) => startNdi(cfg || {}));
+ipcMain.handle('lidar:ndi-stop', async () => { stopNdi(); return { ok: true }; });
 
 ipcMain.handle('lidar:warp', async (_evt, patch) => {
   pipeline.setWarp(patch);
