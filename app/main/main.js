@@ -128,8 +128,11 @@ function startSyphon(cfg) {
   stopSyphon();
   const W = parseInt(cfg.w, 10) || 1280;
   const H = parseInt(cfg.h, 10) || 720;
+  // Retina: the offscreen framebuffer = window size × scaleFactor. Divide the window
+  // size by the display scale so the published pixels equal the requested W×H exactly.
+  const sf = (screen.getPrimaryDisplay().scaleFactor) || 1;
   syWin = new BrowserWindow({
-    show: false, width: W, height: H,
+    show: false, width: Math.max(1, Math.round(W / sf)), height: Math.max(1, Math.round(H / sf)),
     webPreferences: {
       offscreen: true,
       preload: path.join(__dirname, '..', 'projector-preload.js'),
