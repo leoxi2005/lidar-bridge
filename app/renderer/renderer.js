@@ -241,6 +241,10 @@ function drawWarpOverlay(s) {
     if (interactive) {
       ctx.font = "600 10px 'IBM Plex Mono', monospace"; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = isSel ? '#ffffff' : (on ? '#bff3fb' : '#b9c6cd'); ctx.fillText('(' + WARP_TARGETS[i] + ')', sx, sy - 14);
+      // live world-coordinate readout under each handle (helps align to wall corners)
+      ctx.font = "500 9px 'IBM Plex Mono', monospace";
+      ctx.fillStyle = isSel ? '#ffffff' : 'rgba(0,229,255,0.7)';
+      ctx.fillText(p[0].toFixed(2) + ', ' + p[1].toFixed(2) + ' m', sx, sy + 22);
     }
   });
   // bounding box + scale handles (when >=2 corners selected)
@@ -326,6 +330,19 @@ function warpFlip(horizontal) {
   for (const i of idxs) { if (horizontal) warp.corners[i][0] = 2 * cx - warp.corners[i][0]; else warp.corners[i][1] = 2 * cy - warp.corners[i][1]; }
   pushWarp();
 }
+// Snap a single corner onto the nearest point-cloud point (a wall return) within
+// `maxD` metres — makes it easy to land a corner exactly on a wall corner.
+function snapCornerToCloud(i, maxD = 0.3) {
+  let bestX = 0, bestY = 0, bestD = maxD, found = false;
+  for (const b of bins) {
+    if (!b) continue;
+    const d = Math.hypot(b.x - warp.corners[i][0], b.y - warp.corners[i][1]);
+    if (d < bestD) { bestD = d; bestX = b.x; bestY = b.y; found = true; }
+  }
+  if (found) warp.corners[i] = [bestX, bestY];
+  return found;
+}
+
 function warpUndo() { if (!warp.undo.length) return; warp.redo.push(JSON.stringify(warp.corners)); warp.corners = JSON.parse(warp.undo.pop()); pushWarp(); updateWarpButtons(); }
 function warpRedo() { if (!warp.redo.length) return; warp.undo.push(JSON.stringify(warp.corners)); warp.corners = JSON.parse(warp.redo.pop()); pushWarp(); updateWarpButtons(); }
 
@@ -997,7 +1014,10 @@ function wireControls() {
   });
   window.addEventListener('mouseup', (e) => {
     if (warpScale) { warpScale = null; pushWarp(); }
-    if (warpDrag) { warpDrag = null; pushWarp(); }
+    if (warpDrag) {
+      if (warp.sel.length === 1) snapCornerToCloud(warp.sel[0]); // snap single corner to a wall point
+      warpDrag = null; pushWarp();
+    }
     if (warp.marquee) {
       const m = warp.marquee;
       const x0 = Math.min(m.x0, m.x1), x1 = Math.max(m.x0, m.x1), y0 = Math.min(m.y0, m.y1), y1 = Math.max(m.y0, m.y1);
