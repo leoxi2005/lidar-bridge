@@ -36,6 +36,9 @@ class RPLidar extends EventEmitter {
   constructor() {
     super();
     this.port = null;
+    this._sock = null;
+    this._write = null;
+    this._kind = 'serial';
     this.buffer = Buffer.alloc(0);
     this.mode = 'idle'; // 'idle' | 'response' | 'scan'
     this._pending = null; // { n, resolve, reject }
@@ -46,25 +49,54 @@ class RPLidar extends EventEmitter {
   }
 
   // ---- public API ---------------------------------------------------------
-  async connect({ path, baudRate }) {
-    if (this.port) await this.disconnect();
-    this._log(`opening ${path} @ ${baudRate}`);
+  // cfg: serial -> { path, baudRate }; network -> { host, port, udp }
+  async connect(cfg) {
+    if (this.port || this._sock) await this.disconnect();
+    if (cfg.host) await this._openNetwork(cfg);
+    else await this._openSerial(cfg);
+    return this._init();
+  }
 
+  async _openSerial({ path, baudRate }) {
+    this._kind = 'serial';
+    this._log(`opening ${path} @ ${baudRate}`);
     const SP = loadSerialPort();
     this.port = new SP({ path, baudRate, autoOpen: false });
     this.port.on('data', (chunk) => this._onData(chunk));
     this.port.on('error', (err) => this.emit('error', err));
-    this.port.on('close', () => {
-      this.connected = false;
-      this.emit('status', 'port closed');
-    });
-
+    this.port.on('close', () => { this.connected = false; this.emit('status', 'port closed'); });
+    this._write = (buf) => this.port.write(buf);
     await new Promise((res, rej) => this.port.open((e) => (e ? rej(e) : res())));
-
     // Spin the motor: on A1 the motor runs when DTR is asserted low (false).
-    // A2/A3 ignore DTR (PWM-driven) but tolerate it, so this is safe everywhere.
     await this._setSignals({ dtr: false });
+  }
 
+  async _openNetwork({ host, port, udp }) {
+    port = parseInt(port, 10) || 8089;
+    if (udp) {
+      this._kind = 'udp';
+      const dgram = require('dgram');
+      this._log(`UDP ${host}:${port}`);
+      this._sock = dgram.createSocket('udp4');
+      this._sock.on('message', (msg) => this._onData(msg));
+      this._sock.on('error', (err) => this.emit('error', err));
+      this._write = (buf) => this._sock.send(buf, port, host);
+      await new Promise((res) => this._sock.connect ? this._sock.connect(port, host, res) : res());
+    } else {
+      this._kind = 'tcp';
+      const net = require('net');
+      this._log(`TCP ${host}:${port}`);
+      await new Promise((res, rej) => {
+        this._sock = net.createConnection({ host, port }, res);
+        this._sock.on('data', (chunk) => this._onData(chunk));
+        this._sock.on('error', (err) => { this.emit('error', err); rej(err); });
+        this._sock.on('close', () => { this.connected = false; this.emit('status', 'connection closed'); });
+      });
+      this._write = (buf) => this._sock.write(buf);
+    }
+  }
+
+  async _init() {
     // Reset parser state, stop any scan already running, then probe the device.
     this._send(CMD.STOP);
     await delay(30);
@@ -97,16 +129,20 @@ class RPLidar extends EventEmitter {
   }
 
   async disconnect() {
-    if (!this.port) return;
     try {
       this._send(CMD.STOP);
       await delay(20);
-      await this._setSignals({ dtr: true }); // stop motor (A1)
+      if (this._kind === 'serial') await this._setSignals({ dtr: true }); // stop motor (A1)
     } catch (_) {
       /* ignore */
     }
-    await new Promise((res) => this.port.close(() => res()));
+    try {
+      if (this.port) await new Promise((res) => this.port.close(() => res()));
+      else if (this._sock) { this._sock.removeAllListeners(); this._sock.destroy ? this._sock.destroy() : this._sock.close(); }
+    } catch (_) { /* ignore */ }
     this.port = null;
+    this._sock = null;
+    this._write = null;
     this.connected = false;
     this.mode = 'idle';
     this.buffer = Buffer.alloc(0);
@@ -135,7 +171,7 @@ class RPLidar extends EventEmitter {
     } else {
       pkt = Buffer.from([SYNC0, cmd]);
     }
-    this.port.write(pkt);
+    if (this._write) this._write(pkt);
   }
 
   _onData(chunk) {

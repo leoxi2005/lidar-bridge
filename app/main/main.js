@@ -320,7 +320,8 @@ async function doReconnect() {
       if (source) { source.removeAllListeners(); try { await source.disconnect(); } catch (_) {} source = null; }
       source = new RPLidar();
       wireSource(source);
-      await source.connect({ path: lastConnectCfg.comPort, baudRate: parseInt(lastConnectCfg.baudrate, 10) || 115200 });
+      if (lastConnectCfg.network) await source.connect({ host: lastConnectCfg.host, port: lastConnectCfg.port, udp: lastConnectCfg.udp });
+      else await source.connect({ path: lastConnectCfg.comPort, baudRate: parseInt(lastConnectCfg.baudrate, 10) || 115200 });
       lastScanAt = Date.now();
       startSender();
       send('lidar:status', 'reconnected');
@@ -385,18 +386,17 @@ ipcMain.handle('lidar:connect', async (_evt, config) => {
       startSender();
       return { ok: true, simulated: true, info };
     }
-    if (config.connType === 'network') {
-      throw new Error('Network (TCP/UDP) acquisition is a later build step — use SERIAL or SIM.');
-    }
     source = new RPLidar();
     wireSource(source);
-    const info = await source.connect({
-      path: config.comPort,
-      baudRate: parseInt(config.baudrate, 10) || 115200,
-    });
+    let info;
+    if (config.connType === 'network') {
+      info = await source.connect({ host: config.ipAddr, port: config.ipPort, udp: config.netProto === 'udp' });
+      lastConnectCfg = { network: true, host: config.ipAddr, port: config.ipPort, udp: config.netProto === 'udp' };
+    } else {
+      info = await source.connect({ path: config.comPort, baudRate: parseInt(config.baudrate, 10) || 115200 });
+      lastConnectCfg = { comPort: config.comPort, baudrate: config.baudrate };
+    }
     startSender();
-    // arm auto-reconnect for real hardware
-    lastConnectCfg = { comPort: config.comPort, baudrate: config.baudrate };
     autoReconnect = true;
     startWatchdog();
     return { ok: true, simulated: false, info };

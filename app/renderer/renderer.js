@@ -855,6 +855,7 @@ function loadConnFields(id) {
   $('baudrate').value = c.baudrate;
   $('ipAddr').value = c.ipAddr || '192.168.11.2';
   $('ipPort').value = c.ipPort || '8089';
+  setNetProto(c.netProto || 'udp');
   setScan(c.scanMode);
   setPrecision(c.precision);
   $('distMin').value = c.distMin;
@@ -891,6 +892,7 @@ function saveConnFields(id) {
   c.baudrate = $('baudrate').value;
   c.ipAddr = $('ipAddr').value;
   c.ipPort = $('ipPort').value;
+  c.netProto = netProto;
   c.distMin = $('distMin').value;
   c.distMax = $('distMax').value;
 }
@@ -901,7 +903,7 @@ function segActivate(groupAttr, attr, val) {
   });
 }
 
-let connType = 'serial', scanMode = 'express', precision = '2', coordSys = 'cartesian', quality = false;
+let connType = 'serial', scanMode = 'express', precision = '2', coordSys = 'cartesian', quality = false, netProto = 'udp';
 
 function setConn(v) {
   connType = v;
@@ -910,6 +912,7 @@ function setConn(v) {
   $('networkFields').style.display = v === 'network' ? 'flex' : 'none';
   cfgs[ui.selected].connType = v;
 }
+function setNetProto(v) { netProto = v; segActivate('data-net', 'data-net', v); cfgs[ui.selected].netProto = v; }
 function setScan(v) { scanMode = v; segActivate('data-scan', 'data-scan', v); cfgs[ui.selected].scanMode = v; }
 function setPrecision(v) {
   precision = String(v);
@@ -961,6 +964,9 @@ async function doConnect() {
   const cfg = Object.assign({}, cfgs[ui.selected], {
     comPort: $('comPort').value,
     baudrate: $('baudrate').value,
+    ipAddr: $('ipAddr').value,
+    ipPort: $('ipPort').value,
+    netProto,
     scanMode,
     distMin: $('distMin').value,
     distMax: $('distMax').value,
@@ -1009,6 +1015,7 @@ function fitView() { view.z = 1; view.panX = 0; view.panY = 0; }
 // ---- wiring ---------------------------------------------------------------
 function wireControls() {
   document.querySelectorAll('[data-conn]').forEach((b) => (b.onclick = () => setConn(b.getAttribute('data-conn'))));
+  document.querySelectorAll('[data-net]').forEach((b) => (b.onclick = () => setNetProto(b.getAttribute('data-net'))));
   document.querySelectorAll('[data-scan]').forEach((b) => (b.onclick = () => setScan(b.getAttribute('data-scan'))));
   document.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => setPrecision(b.getAttribute('data-p'))));
   document.querySelectorAll('[data-coord]').forEach((b) => (b.onclick = () => setCoord(b.getAttribute('data-coord'))));
@@ -1423,7 +1430,7 @@ window.__collectPreset = function () {
   return {
     selected: ui.selected,
     cfgs: cfgs,
-    connType: connType,
+    connType: connType, netProto: netProto,
     comPort: $('comPort').value, baudrate: $('baudrate').value,
     ipAddr: $('ipAddr').value, ipPort: $('ipPort').value,
     scanMode: scanMode, precision: precision, coordSys: coordSys, quality: quality,
@@ -1444,6 +1451,7 @@ window.__applyPreset = function (o) {
   if (o.cfgs) Object.keys(o.cfgs).forEach(function (k) { cfgs[k] = Object.assign({}, cfgs[k], o.cfgs[k]); });
   if (o.selected) ui.selected = o.selected;
   if (o.connType) setConn(o.connType);
+  if (o.netProto) setNetProto(o.netProto);
   if (o.comPort != null) $('comPort').value = o.comPort;
   if (o.baudrate != null) $('baudrate').value = o.baudrate;
   if (o.ipAddr != null) $('ipAddr').value = o.ipAddr;

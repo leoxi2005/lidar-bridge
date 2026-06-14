@@ -151,9 +151,15 @@ select.input{ padding:0 6px; }
             </select>
           </label>
         </div>
-        <div id="networkFields" class="row" style="display:none">
-          <label class="field" style="flex:1.6"><span class="lbl">IP ADDRESS</span><input id="ipAddr" class="input" value="192.168.11.2" /></label>
-          <label class="field" style="flex:1"><span class="lbl">PORT</span><input id="ipPort" class="input" value="8089" /></label>
+        <div id="networkFields" style="display:none;flex-direction:column;gap:8px">
+          <div class="row">
+            <label class="field" style="flex:1.6"><span class="lbl">IP ADDRESS</span><input id="ipAddr" class="input" value="192.168.11.2" /></label>
+            <label class="field" style="flex:1"><span class="lbl">PORT</span><input id="ipPort" class="input" value="8089" /></label>
+          </div>
+          <div class="row">
+            <button class="seg active" data-net="tcp">TCP</button>
+            <button class="seg" data-net="udp">UDP</button>
+          </div>
         </div>
         <label class="field"><span class="lbl">SCAN MODE</span>
           <div class="row">
