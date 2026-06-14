@@ -46,6 +46,7 @@
         "nsis",
         "portable"
       ],
+      "icon": "build/icon.png",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "extraResources": [
         { "from": "ndi-runtime/win", "to": ".", "filter": ["*.dll"] }
@@ -59,6 +60,7 @@
       "target": [
         "dmg"
       ],
+      "icon": "build/icon.icns",
       "category": "public.app-category.utilities",
       "extraResources": [
         { "from": "ndi-runtime/mac", "to": ".", "filter": ["*.dylib"] }

@@ -8,6 +8,14 @@ const { Pipeline } = require('./pipeline');
 const { OscSender, oscMessage, oscBundle } = require('./osc');
 const { applyH } = require('./homography');
 
+// In dev (`npm start`) the app menu / About / Dock default to "Electron".
+// Set the real product name so it shows "LiDAR Bridge" everywhere.
+app.setName('LiDAR Bridge');
+// Use our icon for the Dock in dev (packaged builds get it from electron-builder).
+if (process.platform === 'darwin' && app.dock) {
+  try { app.dock.setIcon(path.join(__dirname, '..', 'build', 'icon.png')); } catch (_) {}
+}
+
 let projWin = null; // projector output window
 let ndiSender = null; // native NDI sender (koffi -> NDI runtime)
 let ndiWin = null; // offscreen window rendering the mapping for NDI
