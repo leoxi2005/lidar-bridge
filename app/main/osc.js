@@ -52,6 +52,11 @@ class OscSender {
   sendMessage(address, args) {
     this.sendRaw(oscMessage(address, args));
   }
+  // msgs: [{ a: address, args: [...] }] -> one UDP packet (OSC bundle)
+  sendBundle(msgs) {
+    if (!msgs.length) return;
+    this.sendRaw(oscBundle(msgs.map((m) => oscMessage(m.a, m.args))));
+  }
   close() {
     try { this.sock.close(); } catch (_) { /* ignore */ }
   }

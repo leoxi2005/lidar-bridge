@@ -43,16 +43,16 @@ let lastLogAt = 0;
 let latestOut = { tracks: [], zones: [] };
 const zonePrevOn = new Map(); // slug -> last sent occupancy (for enter/exit pulses)
 
-// Emit per-zone OSC: state, count, dwell, and enter/exit pulses on transitions.
-function sendZones(lines) {
+// Push per-zone OSC messages (state, count, dwell, enter/exit) into a bundle array.
+function sendZones(msgs, lines) {
   for (const z of latestOut.zones) {
     const base = '/lidar/zone/' + z.slug;
-    sender.sendMessage(base, [{ type: 'i', value: z.on ? 1 : 0 }]);
-    sender.sendMessage(base + '/count', [{ type: 'i', value: z.count || 0 }]);
-    sender.sendMessage(base + '/dwell', [{ type: 'f', value: z.dwell || 0 }]);
+    msgs.push({ a: base, args: [{ type: 'i', value: z.on ? 1 : 0 }] });
+    msgs.push({ a: base + '/count', args: [{ type: 'i', value: z.count || 0 }] });
+    msgs.push({ a: base + '/dwell', args: [{ type: 'f', value: z.dwell || 0 }] });
     const prev = zonePrevOn.get(z.slug) || false;
-    if (z.on && !prev) sender.sendMessage(base + '/enter', [{ type: 'i', value: 1 }]);
-    if (!z.on && prev) sender.sendMessage(base + '/exit', [{ type: 'i', value: 1 }]);
+    if (z.on && !prev) msgs.push({ a: base + '/enter', args: [{ type: 'i', value: 1 }] });
+    if (!z.on && prev) msgs.push({ a: base + '/exit', args: [{ type: 'i', value: 1 }] });
     zonePrevOn.set(z.slug, z.on);
     if (lines) lines.push(base + '  ' + (z.on ? 1 : 0) + '  n=' + (z.count || 0) + '  d=' + (z.dwell || 0).toFixed(1) + 's');
   }
@@ -231,17 +231,18 @@ function emitOutput() {
     // count. NOTE: TouchDesigner's OSC In CHOP never forgets a channel it has seen, so
     // after a busy moment higher slots linger with stale values — Trim/cull by
     // /lidar/count in TD to keep exactly the active set.
-    sender.sendMessage('/lidar/count', [{ type: 'i', value: ts.length }]);
+    const msgs = [{ a: '/lidar/count', args: [{ type: 'i', value: ts.length }] }];
     for (let i = 0; i < ts.length; i++) {
       const t = ts[i];
       const [a, b] = coord(t);
-      sender.sendMessage(`/lidar/p${i}/on`, [{ type: 'i', value: 1 }]);
-      sender.sendMessage(`/lidar/p${i}/x`, [{ type: 'f', value: a }]);
-      sender.sendMessage(`/lidar/p${i}/y`, [{ type: 'f', value: b }]);
-      sender.sendMessage(`/lidar/p${i}/v`, [{ type: 'f', value: t.vel || 0 }]);
-      sender.sendMessage(`/lidar/p${i}/id`, [{ type: 'i', value: parseInt(t.id, 10) }]);
+      msgs.push({ a: `/lidar/p${i}/on`, args: [{ type: 'i', value: 1 }] });
+      msgs.push({ a: `/lidar/p${i}/x`, args: [{ type: 'f', value: a }] });
+      msgs.push({ a: `/lidar/p${i}/y`, args: [{ type: 'f', value: b }] });
+      msgs.push({ a: `/lidar/p${i}/v`, args: [{ type: 'f', value: t.vel || 0 }] });
+      msgs.push({ a: `/lidar/p${i}/id`, args: [{ type: 'i', value: parseInt(t.id, 10) }] });
     }
-    sendZones(lines);
+    sendZones(msgs, lines);
+    sender.sendBundle(msgs); // one UDP packet
     lines.push(`/lidar/count  ${ts.length}`);
     ts.slice(0, 4).forEach((t, i) => { const [a, b] = coord(t); lines.push(`/lidar/p${i}  on 1  ${a.toFixed(2)} ${b.toFixed(2)}  v${(t.vel || 0).toFixed(2)}  id${t.id}`); });
     for (const z of latestOut.zones) lines.push(`/lidar/zone/${z.slug}  ${z.on ? 1 : 0}`);
@@ -541,7 +542,8 @@ async function runAutoShot() {
     if (process.env.LIDAR_SHOT_PROJ && projWin && !projWin.isDestroyed()) target = projWin;
     try {
       const lat = await win.webContents.executeJavaScript("document.getElementById('latency').textContent");
-      console.log('LATENCY_MS ' + lat);
+      const fps = await win.webContents.executeJavaScript("document.getElementById('fps').textContent");
+      console.log('LATENCY_MS ' + lat + ' FPS ' + fps);
     } catch (_) { /* ignore */ }
     const img = await target.webContents.capturePage();
     fs.writeFileSync(out, img.toPNG());

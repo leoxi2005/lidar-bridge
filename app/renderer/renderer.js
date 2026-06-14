@@ -532,9 +532,15 @@ let frames = 0, fpsAccum = 0, fps = 0;
 // ---- draw -----------------------------------------------------------------
 let sweep = 0;
 let lastFrame = performance.now();
+let lastDrawAt = 0; // render FPS cap (saves CPU/GPU vs 120Hz ProMotion)
 
 function draw() {
-  const now = performance.now();
+  requestAnimationFrame(draw);
+  const cap = ui.streaming ? 60 : 30; // full rate when live, half when paused
+  const t0 = performance.now();
+  if (t0 - lastDrawAt < 1000 / cap - 0.5) return;
+  lastDrawAt = t0;
+  const now = t0;
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
   if (ui.streaming) sweep = (sweep + (2 * Math.PI * dt) / SWEEP_PERIOD) % (2 * Math.PI);
@@ -760,7 +766,6 @@ function draw() {
   $('latency').textContent = ui.connected && liveStats.latency ? liveStats.latency.toFixed(0) : '—';
 
   drawMonitor();
-  requestAnimationFrame(draw);
 }
 
 // Output monitor: the mapping in normalized 0–1 space (what TouchDesigner receives).
