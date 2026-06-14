@@ -147,10 +147,18 @@ function startSyphon(cfg) {
   syWin.webContents.on('paint', (_e, _dirty, image) => {
     if (!syServer) return;
     const size = image.getSize();
-    const bmp = image.getBitmap(); // BGRA, top-left origin
+    const bmp = image.getBitmap(); // Electron is BGRA; Syphon expects RGBA -> swizzle R/B
+    const n = bmp.length;
+    const rgba = new Uint8ClampedArray(n);
+    for (let i = 0; i < n; i += 4) {
+      rgba[i] = bmp[i + 2];
+      rgba[i + 1] = bmp[i + 1];
+      rgba[i + 2] = bmp[i];
+      rgba[i + 3] = bmp[i + 3];
+    }
     try {
       syServer.publishImageData(
-        new Uint8ClampedArray(bmp.buffer, bmp.byteOffset, bmp.byteLength),
+        rgba,
         { x: 0, y: 0, width: size.width, height: size.height },
         { width: size.width, height: size.height },
         true, // flip to GL bottom-left origin
