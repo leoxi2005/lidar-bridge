@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { RPLidar } = require('./rplidar');
@@ -485,7 +485,57 @@ async function runAutoShot() {
   app.quit();
 }
 
-app.whenReady().then(createWindow);
+// ---- preset save / load --------------------------------------------------
+async function savePreset() {
+  if (!win) return;
+  const res = await dialog.showSaveDialog(win, {
+    title: 'Save preset', defaultPath: 'lidar-bridge.json',
+    filters: [{ name: 'LiDAR Bridge preset', extensions: ['json'] }],
+  });
+  if (res.canceled || !res.filePath) return;
+  let state = {};
+  try { state = await win.webContents.executeJavaScript('window.__collectPreset && window.__collectPreset()'); } catch (_) {}
+  state = state || {};
+  state.baseline = pipeline.bgCaptured ? Array.from(pipeline.bg) : null;
+  fs.writeFileSync(res.filePath, JSON.stringify(state, null, 2));
+  send('lidar:status', 'preset saved: ' + path.basename(res.filePath));
+}
+
+async function openPreset() {
+  if (!win) return;
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Open preset', properties: ['openFile'],
+    filters: [{ name: 'LiDAR Bridge preset', extensions: ['json'] }],
+  });
+  if (res.canceled || !res.filePaths || !res.filePaths.length) return;
+  let obj;
+  try { obj = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8')); } catch (e) { send('lidar:status', 'preset load failed: ' + e.message); return; }
+  if (obj.baseline) pipeline.setBaseline(obj.baseline);
+  try { await win.webContents.executeJavaScript('window.__applyPreset(' + JSON.stringify(obj) + ')'); } catch (e) { send('lidar:status', 'apply failed: ' + e.message); }
+  send('lidar:status', 'preset loaded: ' + path.basename(res.filePaths[0]));
+}
+
+function buildMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'Save Preset…', accelerator: 'CmdOrCtrl+S', click: savePreset },
+        { label: 'Open Preset…', accelerator: 'CmdOrCtrl+O', click: openPreset },
+        { type: 'separator' },
+        isMac ? { role: 'close' } : { role: 'quit' },
+      ],
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+app.whenReady().then(() => { buildMenu(); createWindow(); });
 app.on('window-all-closed', async () => {
   await teardownSource();
   if (process.platform !== 'darwin') app.quit();

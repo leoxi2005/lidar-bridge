@@ -1308,4 +1308,72 @@ function boot() {
   requestAnimationFrame(draw);
 }
 
+// ---- preset collect / apply (called from main via the File menu) ----------
+window.__collectPreset = function () {
+  return {
+    selected: ui.selected,
+    cfgs: cfgs,
+    connType: connType,
+    comPort: $('comPort').value, baudrate: $('baudrate').value,
+    ipAddr: $('ipAddr').value, ipPort: $('ipPort').value,
+    scanMode: scanMode, precision: precision, coordSys: coordSys, quality: quality,
+    distMin: $('distMin').value, distMax: $('distMax').value,
+    placement: { x: $('posX').value, y: $('posY').value, rot: $('rot').value },
+    bg: { subtract: bg.subtract, tol: bg.tol, captured: bg.captured },
+    zones: zones.map(function (z) { return { name: z.name, slug: z.slug, pts: z.pts, visible: z.visible }; }),
+    warp: { corners: warp.corners, enabled: warp.enabled, rotStep: warp.rotStep },
+    out: { protocol: out.protocol, host: out.host, port: out.port, sendRate: out.sendRate, format: out.format, normalize: out.normalize },
+    ndiCfg: ndiCfg,
+    outputMode: outputMode,
+  };
+};
+
+window.__applyPreset = function (o) {
+  if (!o) return;
+  if (o.cfgs) Object.keys(o.cfgs).forEach(function (k) { cfgs[k] = Object.assign({}, cfgs[k], o.cfgs[k]); });
+  if (o.selected) ui.selected = o.selected;
+  if (o.connType) setConn(o.connType);
+  if (o.comPort != null) $('comPort').value = o.comPort;
+  if (o.baudrate != null) $('baudrate').value = o.baudrate;
+  if (o.ipAddr != null) $('ipAddr').value = o.ipAddr;
+  if (o.ipPort != null) $('ipPort').value = o.ipPort;
+  if (o.scanMode) setScan(o.scanMode);
+  if (o.precision) setPrecision(o.precision);
+  if (o.coordSys) setCoord(o.coordSys);
+  if (o.distMin != null) $('distMin').value = o.distMin;
+  if (o.distMax != null) $('distMax').value = o.distMax;
+  if (o.quality != null) setQuality(o.quality);
+  if (o.placement) { $('posX').value = o.placement.x; $('posY').value = o.placement.y; $('rot').value = o.placement.rot; pushPlacement(); }
+  if (o.bg) {
+    bg.tol = parseFloat(o.bg.tol) || 0.18;
+    $('bgTol').value = bg.tol; $('bgTolLabel').textContent = Math.round(bg.tol * 100) + ' cm';
+    window.lidar.setConfig({ bgTol: bg.tol });
+    syncBgUi(!!o.bg.captured, false);
+    setBgSubtract(!!o.bg.subtract);
+  }
+  if (o.zones) { zones = o.zones.map(function (z) { return { name: z.name, slug: z.slug, pts: z.pts, visible: z.visible !== false, occupied: false }; }); pushZones(); renderZoneCards(); }
+  if (o.warp) {
+    warp.corners = o.warp.corners; warp.rotStep = o.warp.rotStep || 15;
+    if ($('warpRotStep')) $('warpRotStep').value = warp.rotStep;
+    renderCornerInputs(); recomputeWarp(); setWarpEnabled(!!o.warp.enabled);
+  }
+  if (o.out) {
+    Object.assign(out, o.out);
+    $('oscHost').value = out.host; $('oscPort').value = out.port;
+    document.querySelectorAll('[data-proto]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-proto') === out.protocol); });
+    document.querySelectorAll('[data-rate]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-rate') === String(out.sendRate)); });
+    updateOscPreview(); updatePill(); pushOutput();
+  }
+  if (o.ndiCfg) { Object.assign(ndiCfg, o.ndiCfg); buildNdiConfig(); }
+  if (o.outputMode) {
+    outputMode = o.outputMode;
+    document.querySelectorAll('[data-omode]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-omode') === outputMode); });
+    $('ndiConfig').style.display = (outputMode === 'ndi' || outputMode === 'syphon') ? 'flex' : 'none';
+    updateOutputAction();
+  }
+  window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value, quality: quality });
+  $('selName').textContent = (SENSORS.find(function (s) { return s.id === ui.selected; }) || { name: '' }).name;
+  renderDevices();
+};
+
 boot();

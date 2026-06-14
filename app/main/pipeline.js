@@ -157,6 +157,14 @@ class Pipeline {
     this.cfg.bgSubtract = false;
   }
 
+  // restore a saved baseline (from a preset)
+  setBaseline(arr) {
+    if (!arr || !arr.length) return;
+    this.bg = Float32Array.from(arr);
+    this.bgCaptured = true;
+    this._capFrames = 0;
+  }
+
   // nodes: [{ angle (deg), distMm, quality }]; dtSec = seconds since previous scan
   // returns a frame: { pts, count, nbins, tracks, ... }
   process(nodes, dtSec = 0.1) {
