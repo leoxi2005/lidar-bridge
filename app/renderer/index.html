@@ -144,7 +144,10 @@ select.input{ padding:0 6px; }
           <button class="seg active" data-conn="serial">SERIAL</button>
           <button class="seg" data-conn="network">NETWORK</button>
         </div>
-        <button id="autoDetectBtn" class="btn cyan" style="width:100%;justify-content:center">🔍 AUTO-DETECT</button>
+        <div class="row">
+          <button id="autoDetectBtn" class="btn cyan" style="flex:1;justify-content:center">🔍 AUTO-DETECT</button>
+          <button id="fusionBtn" class="btn" style="flex:1;justify-content:center;border-color:rgba(201,139,255,0.4);background:rgba(201,139,255,0.08);color:#dcc4ff">⚡ FUSION</button>
+        </div>
         <div id="detectResult" class="mono" style="display:none;font-size:10.5px;color:#9aa3ad;background:#0b0e11;border:1px solid var(--border);border-radius:7px;padding:8px 10px;line-height:1.6"></div>
         <div id="serialFields" class="row">
           <label class="field" style="flex:1"><span class="lbl">COM PORT</span>

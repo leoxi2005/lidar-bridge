@@ -240,52 +240,17 @@ class Pipeline {
       if (this._capFrames === 0) this.bgCaptured = true;
     }
 
-    // CLUSTER + TRACK
-    const blobs = this._clusterBlobs(fgPts);
-    this._updateTracks(blobs, dtSec);
-
-    // ZONES: per-zone people count, occupancy, dwell time (confirmed tracks only).
-    const confirmed = this.confirmedTracks();
-    const nowMs = Date.now();
-    for (const t of confirmed) t.zone = '';
-    const zoneInfo = this.zones.map((z) => {
-      let cnt = 0;
-      for (const t of confirmed) {
-        if (pointInPoly(t.x, t.y, z.pts)) { cnt++; if (!t.zone) t.zone = z.name; }
-      }
-      const on = cnt > 0;
-      let rt = this._zoneRT.get(z.slug);
-      if (!rt) { rt = { since: 0 }; this._zoneRT.set(z.slug, rt); }
-      if (on && !rt.since) rt.since = nowMs;
-      if (!on) rt.since = 0;
-      return { slug: z.slug, name: z.name, on, count: cnt, dwell: rt.since ? (nowMs - rt.since) / 1000 : 0 };
-    });
-    const zoneOcc = zoneInfo.map((z) => z.on);
-
+    // CLUSTER + TRACK + ZONES (shared with the multi-sensor fusion path)
+    const fin = this._finishFrame(fgPts, dtSec);
     const frame = {
       pts,
       count,
       nbins: NBINS,
       bgCaptured: this.bgCaptured,
       capturing,
-      zoneOcc,
-      zoneInfo,
-      tracks: confirmed.map((t) => {
-        const [u, v] = applyH(this.warpH, t.x, t.y);
-        return {
-          id: t.id,
-          x: t.x,
-          y: t.y,
-          u,
-          v,
-          out: u < 0 || u > 1 || v < 0 || v > 1, // outside the mapped area
-          vx: t.vx,
-          vy: t.vy,
-          vel: Math.hypot(t.vx, t.vy),
-          color: t.color,
-          zone: t.zone || '',
-        };
-      }),
+      zoneOcc: fin.zoneOcc,
+      zoneInfo: fin.zoneInfo,
+      tracks: fin.tracks,
     };
 
     // baseline contour (world metres) for the orange dashed ghost outline
@@ -385,6 +350,113 @@ class Pipeline {
 
   // confirmed tracks only (have a public id)
   confirmedTracks() { return this.tracks.filter((t) => t.id); }
+
+  // Cluster the (merged) world foreground points, update tracks, compute zones.
+  // Shared by the single-sensor process() and the multi-sensor processFusion().
+  _finishFrame(fgPts, dtSec) {
+    const blobs = this._clusterBlobs(fgPts);
+    this._updateTracks(blobs, dtSec);
+    const confirmed = this.confirmedTracks();
+    const nowMs = Date.now();
+    for (const t of confirmed) t.zone = '';
+    const zoneInfo = this.zones.map((z) => {
+      let cnt = 0;
+      for (const t of confirmed) {
+        if (pointInPoly(t.x, t.y, z.pts)) { cnt++; if (!t.zone) t.zone = z.name; }
+      }
+      const on = cnt > 0;
+      let rt = this._zoneRT.get(z.slug);
+      if (!rt) { rt = { since: 0 }; this._zoneRT.set(z.slug, rt); }
+      if (on && !rt.since) rt.since = nowMs;
+      if (!on) rt.since = 0;
+      return { slug: z.slug, name: z.name, on, count: cnt, dwell: rt.since ? (nowMs - rt.since) / 1000 : 0 };
+    });
+    const zoneOcc = zoneInfo.map((z) => z.on);
+    const tracks = confirmed.map((t) => {
+      const [u, v] = applyH(this.warpH, t.x, t.y);
+      return {
+        id: t.id, x: t.x, y: t.y, u, v,
+        out: u < 0 || u > 1 || v < 0 || v > 1,
+        vx: t.vx, vy: t.vy, vel: Math.hypot(t.vx, t.vy),
+        color: t.color, zone: t.zone || '',
+      };
+    });
+    return { zoneOcc, zoneInfo, tracks };
+  }
+
+  // ---- multi-sensor fusion (F7) -------------------------------------------
+  // Per-sensor state: its own background baseline (indexed by that sensor's angle
+  // bins) + capture countdown. Keyed by sensor id.
+  _sensorState(id) {
+    if (!this._sensors) this._sensors = new Map();
+    let s = this._sensors.get(id);
+    if (!s) { s = { bg: new Float32Array(NBINS), bgCaptured: false, capFrames: 0 }; this._sensors.set(id, s); }
+    return s;
+  }
+  captureBackgroundSensor(id, frames = 60) {
+    const s = this._sensorState(id); s.bg.fill(0); s.capFrames = frames; s.bgCaptured = false;
+  }
+  clearBackgroundSensor(id) {
+    const s = this._sensorState(id); s.bg.fill(0); s.bgCaptured = false; s.capFrames = 0;
+  }
+  removeSensor(id) { if (this._sensors) this._sensors.delete(id); }
+
+  // Transform one sensor's polar nodes to WORLD points using its pose + per-sensor
+  // background subtract, appending raw world points to `outRaw` (flat [x,y,fg,...])
+  // and foreground points to `fgPts` (for clustering). Tags raw points with a
+  // sensor index for colour-coding in the UI.
+  _castSensor(id, nodes, pose, sidx, outRaw, fgPts) {
+    const s = this._sensorState(id);
+    const px = pose.x || 0, py = pose.y || 0, rot = (pose.rot || 0) * DEG, sc = pose.scale || 1;
+    const cosR = Math.cos(rot), sinR = Math.sin(rot);
+    const capturing = s.capFrames > 0;
+    const subtract = this.cfg.bgSubtract && s.bgCaptured;
+    const tol = this.cfg.bgTol;
+    let count = 0;
+    for (const node of nodes) {
+      const distM = node.distMm / 1000;
+      if (distM <= 0) continue;
+      if (this.cfg.quality && node.quality < 150) continue;
+      if (distM < this.cfg.distMin || distM > this.cfg.distMax) continue;
+      const idx = angleToBin(node.angle);
+      const a = node.angle * DEG;
+      const lx = Math.cos(a) * distM * sc, ly = Math.sin(a) * distM * sc;
+      const wx = px + lx * cosR - ly * sinR, wy = py + lx * sinR + ly * cosR;
+      let fg = 1;
+      if (subtract) { const base = s.bg[idx]; fg = base > 0.001 ? (distM < base - tol ? 1 : 0) : 1; }
+      if (capturing && distM > s.bg[idx]) s.bg[idx] = distM;
+      outRaw.push(wx, wy, fg, sidx);
+      if (fg === 1) fgPts.push([wx, wy]);
+      count++;
+    }
+    if (capturing) { s.capFrames--; if (s.capFrames === 0) s.bgCaptured = true; }
+    return count;
+  }
+
+  // sensors: [{ id, nodes, pose:{x,y,rot,scale} }]. Merges all into one world frame.
+  processFusion(sensors, dtSec = 0.1) {
+    const raw = [];      // flat [x, y, fg, sensorIndex, ...]
+    const fgPts = [];    // merged foreground world points for clustering
+    let count = 0, capturing = false, anyCaptured = false;
+    sensors.forEach((sen, i) => {
+      count += this._castSensor(sen.id, sen.nodes || [], sen.pose || {}, i, raw, fgPts);
+      const st = this._sensorState(sen.id);
+      if (st.capFrames > 0) capturing = true;
+      if (st.bgCaptured) anyCaptured = true;
+    });
+    const fin = this._finishFrame(fgPts, dtSec);
+    return {
+      fused: true,
+      worldPts: Float32Array.from(raw),
+      count,
+      sensorCount: sensors.length,
+      bgCaptured: anyCaptured,
+      capturing,
+      zoneOcc: fin.zoneOcc,
+      zoneInfo: fin.zoneInfo,
+      tracks: fin.tracks,
+    };
+  }
 }
 
 module.exports = { Pipeline, NBINS, angleToBin };

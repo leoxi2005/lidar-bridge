@@ -31,9 +31,15 @@ let takes = []; // [{ id, name, durMs, frames:[{t, nodes}] }]
 let takeSeq = 0;
 
 let win = null;
-let source = null; // active RPLidar | Simulator
+let source = null; // active RPLidar | Simulator (single-sensor mode)
 const pipeline = new Pipeline();
 let lastScanAt = 0;
+
+// ---- multi-sensor fusion (F7) ---------------------------------------------
+let fusionMode = false;
+const fusionSources = new Map(); // id -> { sensor, pose }
+const fusionScans = new Map();   // id -> latest nodes[]
+let fusionTimer = null;
 
 // auto-reconnect watchdog (real hardware)
 let lastConnectCfg = null;
@@ -122,6 +128,40 @@ function onScan(nodes) {
       uv: z.pts.map((p) => applyH(pipeline.warpH, p[0], p[1])),
     })),
   });
+}
+
+// Fusion tick: merge the latest scan from every connected sensor (each through its
+// own pose + baseline) into one world frame, then stream it like onScan does.
+let fusionLast = 0;
+function fusionTick() {
+  const now = Date.now();
+  const periodMs = fusionLast ? now - fusionLast : 100;
+  fusionLast = now;
+  const dtSec = Math.min(0.5, periodMs / 1000);
+  const sensors = [];
+  for (const [id, s] of fusionSources) sensors.push({ id, nodes: fusionScans.get(id) || [], pose: s.pose || {} });
+  const frame = pipeline.processFusion(sensors, dtSec);
+  frame.periodMs = periodMs;
+  send('lidar:scan', frame);
+  latestOut = { tracks: frame.tracks, zones: frame.zoneInfo || [] };
+  broadcastProjectorFrame({
+    warpEnabled: pipeline.warpEnabled,
+    tracks: frame.tracks.map((t) => ({ u: t.u, v: t.v, out: t.out, color: t.color, id: t.id })),
+    zones: pipeline.zones.map((z, i) => ({
+      name: z.name, occupied: !!frame.zoneOcc[i],
+      uv: z.pts.map((p) => applyH(pipeline.warpH, p[0], p[1])),
+    })),
+  });
+}
+
+async function teardownFusion() {
+  if (fusionTimer) { clearInterval(fusionTimer); fusionTimer = null; }
+  for (const [, s] of fusionSources) {
+    try { s.sensor.removeAllListeners(); await s.sensor.disconnect(); } catch (_) {}
+  }
+  fusionSources.clear();
+  fusionScans.clear();
+  fusionMode = false;
 }
 
 // Send a frame to every output surface (visible projector window + offscreen Syphon render).
@@ -350,6 +390,7 @@ async function doReconnect() {
 
 async function teardownSource() {
   stopSender();
+  await teardownFusion();
   if (source) {
     try {
       await source.disconnect();
@@ -464,6 +505,60 @@ ipcMain.handle('lidar:disconnect', async () => {
 
 ipcMain.handle('lidar:config', async (_evt, patch) => {
   pipeline.setConfig(patch);
+  return { ok: true };
+});
+
+// ---- multi-sensor fusion IPC (F7) ----------------------------------------
+// devices: [{ id, connType, comPort, baudrate, ipAddr, ipPort, netProto, pose }]
+// common:  { distMin, distMax, quality }
+ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
+  autoReconnect = false; reconnecting = false; stopWatchdog();
+  await teardownSource();
+  const { devices = [], common = {} } = payload || {};
+  if (!devices.length) return { ok: false, error: 'no devices' };
+  pipeline.setConfig({ quality: common.quality, distMin: common.distMin, distMax: common.distMax });
+  fusionMode = true;
+  const connected = [];
+  for (const d of devices) {
+    const isSim = String(d.comPort).trim().toUpperCase() === 'SIM' || d.connType === 'simulator';
+    const sensor = isSim ? new Simulator() : new RPLidar();
+    const id = d.id;
+    sensor.on('scan', (nodes) => { fusionScans.set(id, nodes); lastScanAt = Date.now(); });
+    sensor.on('status', (msg) => send('lidar:status', d.name + ': ' + String(msg)));
+    sensor.on('error', (err) => send('lidar:status', d.name + ' ERROR: ' + err.message));
+    try {
+      if (isSim) await sensor.connect();
+      else if (d.connType === 'network') await sensor.connect({ host: d.ipAddr, port: d.ipPort, udp: d.netProto === 'udp' });
+      else await sensor.connect({ path: d.comPort, baudRate: parseInt(d.baudrate, 10) || 1000000 });
+      fusionSources.set(id, { sensor, pose: d.pose || {} });
+      connected.push(d.name || id);
+    } catch (e) {
+      send('lidar:status', (d.name || id) + ' failed: ' + e.message);
+    }
+  }
+  if (!fusionSources.size) { fusionMode = false; return { ok: false, error: 'không kết nối được sensor nào' }; }
+  fusionLast = 0;
+  const hz = outCfg.sendRate && outCfg.sendRate > 0 ? Math.min(60, outCfg.sendRate) : 30;
+  fusionTimer = setInterval(fusionTick, Math.round(1000 / hz));
+  startSender();
+  send('lidar:status', `FUSION: ${fusionSources.size} sensor — ${connected.join(', ')}`);
+  return { ok: true, connected: fusionSources.size };
+});
+
+// live-update one sensor's pose (position/rotation/scale) during fusion
+ipcMain.handle('lidar:sensor-pose', async (_evt, { id, pose }) => {
+  const s = fusionSources.get(id);
+  if (s) s.pose = pose || {};
+  return { ok: true };
+});
+
+// background capture/clear for fusion: target one sensor id, or all when id omitted
+ipcMain.handle('lidar:sensor-bg', async (_evt, { id, action }) => {
+  const ids = id ? [id] : [...fusionSources.keys()];
+  for (const sid of ids) {
+    if (action === 'clear') pipeline.clearBackgroundSensor(sid);
+    else pipeline.captureBackgroundSensor(sid);
+  }
   return { ok: true };
 });
 

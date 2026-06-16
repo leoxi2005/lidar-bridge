@@ -103,6 +103,9 @@ const stw = (sx, sy) => {
 // The pipeline (main process) already applied placement + mm->m, so the renderer
 // just plots; persistent slots keep the prototype's sweep-fade look across scans.
 const bins = new Array(NBINS).fill(null);
+let worldPts = null; // fusion mode: flat [x, y, fg, sensorIndex, ...]
+let worldPtsT = 0;
+const SENSOR_COLORS = ['#00e5ff', '#ff8a3d', '#39ff7a', '#c98bff', '#ffd23d', '#ff5d8f'];
 const bg = { captured: false, subtract: false, tol: 0.18, contour: null, show: true, hide: true };
 let tracks = [];
 const trails = new Map(); // id -> [[x,y], ...] motion trail
@@ -166,12 +169,20 @@ recomputeWarp();
 function ingestScan(frame) {
   if (!ui.streaming) return;
   const now = performance.now();
-  const pts = frame.pts; // [worldX, worldY, fg] per bin; fg < 0 = empty
-  const nb = frame.nbins;
-  for (let i = 0; i < nb; i++) {
-    const fg = pts[i * 3 + 2];
-    if (fg < 0) continue;
-    bins[i] = { x: pts[i * 3], y: pts[i * 3 + 1], fg, t: now };
+  if (frame.fused) {
+    // multi-sensor: a flat world point list [x, y, fg, sensorIndex, ...]
+    worldPts = frame.worldPts || null;
+    worldPtsT = now;
+    for (let i = 0; i < bins.length; i++) bins[i] = null; // hide single-sensor bins
+  } else {
+    worldPts = null;
+    const pts = frame.pts; // [worldX, worldY, fg] per bin; fg < 0 = empty
+    const nb = frame.nbins;
+    for (let i = 0; i < nb; i++) {
+      const fg = pts[i * 3 + 2];
+      if (fg < 0) continue;
+      bins[i] = { x: pts[i * 3], y: pts[i * 3 + 1], fg, t: now };
+    }
   }
   liveStats.points = frame.count;
   liveStats.latency = frame.periodMs;
@@ -704,8 +715,25 @@ function draw() {
     ctx.restore();
   }
 
-  // point cloud. with subtraction on: foreground = green, background = dim/hidden.
+  // FUSION point cloud: merged world points, coloured per sensor. Foreground (fg=1)
+  // bright, background (fg=0) dim/hidden (same rules as single-sensor).
   const sub = bg.subtract && bg.captured;
+  if (worldPts && worldPts.length) {
+    for (let i = 0; i + 3 < worldPts.length; i += 4) {
+      const fg = worldPts[i + 2];
+      const isBg = sub && fg === 0;
+      if (isBg && bg.hide) continue;
+      const [sx, sy] = wts(worldPts[i], worldPts[i + 1]);
+      if (isBg) { ctx.fillStyle = 'rgba(120,130,140,0.18)'; ctx.fillRect(sx - 0.8, sy - 0.8, 1.6, 1.6); continue; }
+      const col = SENSOR_COLORS[(worldPts[i + 3] | 0) % SENSOR_COLORS.length];
+      ctx.fillStyle = col;
+      ctx.globalAlpha = sub && fg === 1 ? 0.95 : 0.75;
+      ctx.fillRect(sx - 1.2, sy - 1.2, 2.4, 2.4);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // point cloud. with subtraction on: foreground = green, background = dim/hidden.
   for (let i = 0; i < NBINS; i++) {
     const p = bins[i];
     if (!p) continue;
@@ -997,7 +1025,10 @@ function pushPlacement() {
   // remember on the selected device so it survives device switches
   const c = cfgs[ui.selected];
   if (c) { c.posX = placement.x; c.posY = placement.y; c.rot = placement.rot; c.scale = placement.scale; }
-  window.lidar.setConfig({ placement });
+  // In fusion, the transform is the *pose* of the selected sensor (live-updated);
+  // otherwise it's the single-sensor placement in the pipeline.
+  if (fusionActive && ui.selected !== 'sim') window.lidar.sensorPose(ui.selected, placement);
+  else window.lidar.setConfig({ placement });
 }
 
 // Keep the rotation slider <-> number and scale slider <-> number in sync, then push.
@@ -1129,6 +1160,7 @@ async function doConnect() {
     await window.lidar.disconnect();
     ui.connected = false;
     ui.connectedId = null;
+    fusionActive = false;
     setConnStatus('disconnected', '#717a84');
     $('connectBtn').textContent = 'CONNECT';
     $('connectBtn').classList.add('green');
@@ -1198,6 +1230,7 @@ function wireControls() {
   $('qualityBtn').onclick = () => setQuality(!quality);
   $('connectBtn').onclick = doConnect;
   $('autoDetectBtn').onclick = autoDetect;
+  $('fusionBtn').onclick = fusionConnect;
   $('addDeviceBtn').onclick = addManualDevice;
 
   const pushDist = () => { if (ui.connected) window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value }); };
@@ -1221,7 +1254,8 @@ function wireControls() {
   // background mask
   $('captureBg').onclick = () => {
     if (!ui.connected) { setConnStatus('connect a sensor first', '#ffb000'); return; }
-    window.lidar.captureBg();
+    if (fusionActive) window.lidar.sensorBg(null, 'capture'); // capture all sensors
+    else window.lidar.captureBg();
     syncBgUi(false, true);
   };
   $('bgSubToggle').onclick = () => setBgSubtract(!bg.subtract);
@@ -1231,7 +1265,7 @@ function wireControls() {
     window.lidar.setConfig({ bgTol: bg.tol });
   };
   $('clearBg').onclick = () => {
-    window.lidar.clearBg();
+    if (fusionActive) window.lidar.sensorBg(null, 'clear'); else window.lidar.clearBg();
     bg.subtract = false;
     setBgSubtract(false);
     syncBgUi(false, false);
@@ -1580,6 +1614,36 @@ function startTransportLoop() {
       ph.style.width = (100 * ms / (rec.playDur || 1)) + '%';
     } else { ph.style.width = '0'; }
   }, 120);
+}
+
+// ---- multi-sensor fusion (F7) ---------------------------------------------
+let fusionActive = false;
+function poseOf(id) {
+  const c = cfgs[id] || {};
+  return { x: parseFloat(c.posX) || 0, y: parseFloat(c.posY) || 0, rot: parseFloat(c.rot) || 0, scale: parseFloat(c.scale) || 1 };
+}
+async function fusionConnect() {
+  if (ui.connected) { await window.lidar.disconnect(); ui.connected = false; fusionActive = false; }
+  saveConnFields(ui.selected);
+  const devs = SENSORS.filter((s) => s.kind !== 'sim');
+  if (devs.length < 1) { setConnStatus('Chưa có sensor — bấm 🔍 AUTO-DETECT trước', '#ffb000'); return; }
+  const devices = devs.map((s) => {
+    const c = cfgs[s.id];
+    return {
+      id: s.id, name: s.name, connType: c.connType, comPort: c.comPort, baudrate: c.baudrate,
+      ipAddr: c.ipAddr, ipPort: c.ipPort, netProto: c.netProto, pose: poseOf(s.id),
+    };
+  });
+  const common = { distMin: $('distMin').value, distMax: $('distMax').value, quality };
+  setConnStatus('FUSION: đang nối ' + devices.length + ' sensor…', '#ffb000');
+  const res = await window.lidar.connectFusion({ devices, common });
+  if (res && res.ok) {
+    ui.connected = true; fusionActive = true; ui.connectedId = null;
+    setConnStatus('FUSION ✓ ' + res.connected + ' sensor — chỉnh TRANSFORM từng con cho khớp', '#39ff7a');
+    $('connectBtn').textContent = 'DISCONNECT'; $('connectBtn').classList.remove('green');
+    $('protoDot').style.background = '#39ff7a';
+    renderDevices();
+  } else { setConnStatus('FUSION lỗi: ' + (res && res.error || '?'), '#ff4d5e'); }
 }
 
 // ---- ports ----------------------------------------------------------------
