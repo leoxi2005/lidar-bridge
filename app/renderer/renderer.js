@@ -986,6 +986,44 @@ function resetTransform() {
   setRotation(0); setScale(1);
 }
 
+// FIT TO WARP — auto scale + translate the LiDAR data so the live point cloud's
+// bounding box fits inside the warp quad's bounding box (rotation kept as-is, so
+// rotate first if the room is angled). Math: keep current world points, remap as
+// newWorld = warpCenter + k*(oldWorld - dataCenter), which folds into
+// scale' = scale*k and pos' = warpCenter + k*(pos - dataCenter).
+function fitToWarp() {
+  const now = performance.now();
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, n = 0;
+  for (let i = 0; i < bins.length; i++) {
+    const p = bins[i];
+    if (!p || now - p.t > 600) continue; // only fresh points
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; n++;
+  }
+  if (n < 10 || !isFinite(minX)) { setConnStatus('FIT: chưa đủ điểm — CONNECT + STREAMING trước đã', '#ffb000'); return; }
+  const dataW = maxX - minX, dataH = maxY - minY;
+  if (dataW <= 0.01 || dataH <= 0.01) { setConnStatus('FIT: vùng dữ liệu quá nhỏ', '#ffb000'); return; }
+  const cwx = (minX + maxX) / 2, cwy = (minY + maxY) / 2;
+
+  const cs = warp.corners;
+  const wx = cs.map((p) => p[0]), wy = cs.map((p) => p[1]);
+  const tMinX = Math.min.apply(null, wx), tMaxX = Math.max.apply(null, wx);
+  const tMinY = Math.min.apply(null, wy), tMaxY = Math.max.apply(null, wy);
+  const warpW = tMaxX - tMinX, warpH = tMaxY - tMinY;
+  const ctx = (tMinX + tMaxX) / 2, cty = (tMinY + tMaxY) / 2;
+
+  const k = Math.min(warpW / dataW, warpH / dataH); // contain (fit inside)
+  const curScale = parseFloat($('scaleNum').value) || 1;
+  const curX = parseFloat($('posX').value) || 0;
+  const curY = parseFloat($('posY').value) || 0;
+  const newScale = Math.max(0.2, Math.min(3, curScale * k));
+  const kEff = newScale / curScale; // actual factor after clamping
+  $('posX').value = (ctx + kEff * (curX - cwx)).toFixed(2);
+  $('posY').value = (cty + kEff * (curY - cwy)).toFixed(2);
+  setScale(newScale); // also pushes placement (picks up new posX/posY)
+  setConnStatus('FIT TO WARP ✓ — đã căn dữ liệu vào vùng warp', '#39ff7a');
+}
+
 function saveConnFields(id) {
   const c = cfgs[id];
   if (!c) return;
@@ -1142,6 +1180,7 @@ function wireControls() {
   // position nudge buttons
   document.querySelectorAll('[data-nudge]').forEach((b) => (b.onclick = () => nudgeField(b.getAttribute('data-nudge'), b.getAttribute('data-d'))));
   $('resetXform').onclick = resetTransform;
+  $('fitToWarp').onclick = fitToWarp;
   // background mask
   $('captureBg').onclick = () => {
     if (!ui.connected) { setConnStatus('connect a sensor first', '#ffb000'); return; }
