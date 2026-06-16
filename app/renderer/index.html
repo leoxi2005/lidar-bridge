@@ -138,6 +138,14 @@ select.input{ padding:0 6px; }
       <button id="addDeviceBtn" class="dashed">+ THÊM THỦ CÔNG (nhập COM / IP)</button>
       <div class="hair" style="margin:0 0 4px"></div>
 
+      <!-- SURFACES (v3): mỗi mặt chiếu = nhóm sensor + warp + OSC riêng -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px 6px">
+        <span class="sec-title">SURFACES · mặt chiếu</span>
+        <span id="addSurfaceBtn" class="mono" style="font-size:9.5px;color:#dcc4ff;cursor:pointer;padding:2px 7px;border:1px solid rgba(201,139,255,0.4);border-radius:5px">+ MẶT</span>
+      </div>
+      <div id="surfaceList" style="display:flex;flex-direction:column;gap:6px;padding:0 10px 6px"></div>
+      <div class="hair" style="margin:0 0 4px"></div>
+
       <div style="padding:11px 14px 8px" class="sec-title">CONNECTION · <span id="selName">RPLIDAR A3</span></div>
       <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
         <div class="row">

@@ -968,6 +968,7 @@ function renderDevices() {
     list.appendChild(card);
   }
   $('onlineCount').textContent = online + ' ONLINE';
+  if (surfacesData.length) renderSurfaces(); // refresh per-surface sensor chips
 }
 
 function selectDevice(id) {
@@ -1241,6 +1242,7 @@ function wireControls() {
   $('autoDetectBtn').onclick = autoDetect;
   $('fusionBtn').onclick = fusionConnect;
   $('addDeviceBtn').onclick = addManualDevice;
+  $('addSurfaceBtn').onclick = addSurfaceUI;
 
   const pushDist = () => { if (ui.connected) window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value }); };
   $('distMin').onchange = pushDist;
@@ -1687,6 +1689,69 @@ function toggleSensor(id) {
   renderDevices();
 }
 
+// ---- surfaces (v3) --------------------------------------------------------
+let surfacesData = [];
+let activeSurfaceId = null;
+async function refreshSurfaces() {
+  const res = await window.lidar.surfacesList();
+  if (res && res.ok) { surfacesData = res.surfaces; activeSurfaceId = res.activeId; renderSurfaces(); }
+}
+function renderSurfaces() {
+  const list = $('surfaceList'); if (!list) return;
+  list.innerHTML = '';
+  const realDevs = SENSORS.filter((s) => s.kind !== 'sim');
+  for (const surf of surfacesData) {
+    const sel = surf.id === activeSurfaceId;
+    const card = document.createElement('div');
+    card.className = 'dev-card' + (sel ? ' sel' : '');
+    const chips = realDevs.map((d) => {
+      const on = surf.sensorIds.indexOf(d.id) >= 0;
+      return `<span data-asg="${surf.id}|${d.id}" style="cursor:pointer;font-size:8.5px;padding:1px 6px;border-radius:9px;border:1px solid ${on ? 'rgba(201,139,255,0.6)' : 'rgba(255,255,255,0.12)'};color:${on ? '#dcc4ff' : '#717a84'};background:${on ? 'rgba(201,139,255,0.14)' : 'transparent'}">${d.name}</span>`;
+    }).join(' ');
+    const rm = surfacesData.length > 1 ? `<span data-srm="${surf.id}" title="Xoá mặt" style="margin-left:auto;color:#717a84;cursor:pointer;font-size:13px">×</span>` : '';
+    card.innerHTML =
+      (sel ? '<span class="selbar"></span>' : '') +
+      `<div style="display:flex;align-items:center;gap:6px">
+         <input data-sname="${surf.id}" value="${surf.name}" style="background:transparent;border:none;color:${sel ? '#e8ecf1' : '#cdd4dc'};font-weight:600;font-size:11px;width:74px;outline:none"/>
+         <span class="mono" style="font-size:8px;color:#5b636d">OSC/</span>
+         <input data-sosc="${surf.id}" value="${surf.oscPrefix}" placeholder="gốc" style="background:#0b0e11;border:1px solid var(--border);border-radius:4px;color:#9fe4ef;font-family:'IBM Plex Mono',monospace;font-size:8.5px;width:50px;padding:1px 4px;outline:none"/>
+         ${rm}
+       </div>
+       <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px">${chips || '<span class="mono" style="font-size:8.5px;color:#5b636d">chưa có sensor — bấm 🔍 AUTO-DETECT</span>'}</div>`;
+    card.onclick = (e) => {
+      const t = e.target;
+      if (t.getAttribute && t.getAttribute('data-srm')) { removeSurfaceUI(t.getAttribute('data-srm')); return; }
+      const asg = t.getAttribute && t.getAttribute('data-asg');
+      if (asg) { const [sid, did] = asg.split('|'); toggleAssign(sid, did); return; }
+      if (t.tagName === 'INPUT') return;
+      selectSurfaceUI(surf.id);
+    };
+    list.appendChild(card);
+  }
+  list.querySelectorAll('[data-sname]').forEach((el) => (el.onchange = () => window.lidar.surfaceUpdate({ id: el.getAttribute('data-sname'), name: el.value }).then(refreshSurfaces)));
+  list.querySelectorAll('[data-sosc]').forEach((el) => (el.onchange = () => window.lidar.surfaceUpdate({ id: el.getAttribute('data-sosc'), oscPrefix: el.value }).then(refreshSurfaces)));
+}
+async function selectSurfaceUI(id) {
+  const res = await window.lidar.surfaceSelect(id);
+  if (!res || !res.ok) return;
+  activeSurfaceId = id;
+  // load this surface's warp + zones into the editing UI
+  if (res.warp && res.warp.corners) { warp.corners = res.warp.corners.map((c) => c.slice()); warp.enabled = !!res.warp.enabled; recomputeWarp(); if (typeof renderCornerInputs === 'function') renderCornerInputs(); }
+  if (Array.isArray(res.zones)) { zones = res.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts, visible: true, occupied: false })); if (typeof renderZoneCards === 'function') renderZoneCards(); if (typeof updateZoneBadges === 'function') updateZoneBadges(); }
+  renderSurfaces();
+  const nm = (surfacesData.find((s) => s.id === id) || {}).name || '';
+  setConnStatus('Đang sửa mặt: ' + nm + ' (WARP/ZONES/TRANSFORM áp cho mặt này)', '#dcc4ff');
+}
+async function addSurfaceUI() { const res = await window.lidar.surfaceAdd(); if (res && res.ok) { surfacesData = res.surfaces; renderSurfaces(); } }
+async function removeSurfaceUI(id) { const res = await window.lidar.surfaceRemove(id); if (res && res.ok) { surfacesData = res.surfaces; activeSurfaceId = res.activeId; renderSurfaces(); } }
+async function toggleAssign(sid, did) {
+  const surf = surfacesData.find((s) => s.id === sid); if (!surf) return;
+  const has = surf.sensorIds.indexOf(did) >= 0;
+  const ids = has ? surf.sensorIds.filter((x) => x !== did) : surf.sensorIds.concat([did]);
+  const res = await window.lidar.surfaceUpdate({ id: sid, sensorIds: ids });
+  if (res && res.ok) { surfacesData = res.surfaces; renderSurfaces(); }
+}
+
 // ---- ports ----------------------------------------------------------------
 async function refreshPorts() {
   const ports = await window.lidar.listPorts();
@@ -1747,6 +1812,7 @@ function boot() {
   wireControls();
   pushSmooth();
   refreshPorts();
+  refreshSurfaces();
 
   window.lidar.onScan(ingestScan);
   window.lidar.onStatus((msg) => setConnStatus(msg, '#9aa3ad'));
