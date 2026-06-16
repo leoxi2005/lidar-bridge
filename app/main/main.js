@@ -369,10 +369,45 @@ ipcMain.handle('lidar:list-ports', async () => {
       path: p.path,
       manufacturer: p.manufacturer || '',
       serialNumber: p.serialNumber || '',
+      vendorId: p.vendorId || '',
+      productId: p.productId || '',
     }));
   } catch (e) {
     return [];
   }
+});
+
+// Auto-detect: scan every serial port, try each candidate baudrate, and ask the
+// device to identify itself (GET_INFO). Returns the RPLIDARs it found with the
+// port + baudrate + model, so the UI can auto-fill the connection fields.
+ipcMain.handle('lidar:autodetect', async () => {
+  if (source) return { ok: false, error: 'Đang kết nối — hãy DISCONNECT trước khi dò.' };
+  let SerialPort, probe;
+  try {
+    ({ SerialPort } = require('serialport'));
+    ({ probe } = require('./rplidar'));
+  } catch (e) {
+    return { ok: false, error: 'serial unavailable: ' + e.message };
+  }
+  let ports = [];
+  try { ports = await SerialPort.list(); } catch (_) {}
+  // Skip obvious non-sensor ports (Bluetooth/debug) to keep the scan quick.
+  const candidates = ports
+    .map((p) => p.path)
+    .filter((path) => path && !/Bluetooth|debug-console/i.test(path));
+  send('lidar:status', `auto-detect: quét ${candidates.length} cổng…`);
+  const bauds = [1000000, 256000, 115200]; // S2/S3 first, then A3/S1, then A1/A2
+  const found = [];
+  for (const path of candidates) {
+    for (const baud of bauds) {
+      send('lidar:status', `auto-detect: thử ${path} @ ${baud}…`);
+      let info = null;
+      try { info = await probe(path, baud); } catch (_) {}
+      if (info) { found.push(info); break; } // got it — next port
+    }
+  }
+  send('lidar:status', found.length ? `auto-detect: tìm thấy ${found.length} thiết bị` : 'auto-detect: không thấy RPLIDAR nào');
+  return { ok: true, devices: found };
 });
 
 ipcMain.handle('lidar:connect', async (_evt, config) => {

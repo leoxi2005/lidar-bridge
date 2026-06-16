@@ -1026,6 +1026,7 @@ function wireControls() {
   document.querySelectorAll('[data-coord]').forEach((b) => (b.onclick = () => setCoord(b.getAttribute('data-coord'))));
   $('qualityBtn').onclick = () => setQuality(!quality);
   $('connectBtn').onclick = doConnect;
+  $('autoDetectBtn').onclick = autoDetect;
 
   const pushDist = () => { if (ui.connected) window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value }); };
   $('distMin').onchange = pushDist;
@@ -1408,6 +1409,53 @@ async function refreshPorts() {
     o.value = p.path;
     o.label = p.manufacturer ? `${p.path} (${p.manufacturer})` : p.path;
     dl.appendChild(o);
+  }
+}
+
+// Press-and-go: probe every serial port at each baudrate, identify any RPLIDAR,
+// then auto-fill COM port + baudrate with the first one found.
+async function autoDetect() {
+  const btn = $('autoDetectBtn');
+  const box = $('detectResult');
+  if (ui.connected) {
+    box.style.display = 'block';
+    box.textContent = '⚠ Đang kết nối — bấm DISCONNECT trước khi dò.';
+    return;
+  }
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = '⏳ ĐANG DÒ…';
+  box.style.display = 'block';
+  box.textContent = 'Đang quét các cổng COM và thử baudrate…';
+  await refreshPorts();
+  try {
+    const res = await window.lidar.autodetect();
+    if (!res.ok) { box.textContent = '⚠ ' + (res.error || 'lỗi dò'); return; }
+    if (!res.devices || !res.devices.length) {
+      box.innerHTML = '✕ Không thấy RPLIDAR.\nKiểm tra: cáp/đổi cổng USB · đã cài driver CP210x/CH340 · không có app khác (RoboStudio) đang giữ cổng.';
+      return;
+    }
+    const d = res.devices[0];
+    // auto-fill the connection fields with the detected device
+    setConn('serial');
+    $('comPort').value = d.path;
+    $('baudrate').value = String(d.baudrate);
+    $('selName').textContent = d.name;
+    const c = cfgs[ui.selected];
+    if (c) { c.comPort = d.path; c.baudrate = String(d.baudrate); c.connType = 'serial'; }
+    let html = `✓ Tìm thấy: <span style="color:#39ff7a">${d.name}</span>\n`;
+    html += `   cổng <b>${d.path}</b> · baud <b>${d.baudrate}</b> · fw ${d.firmware}\n`;
+    html += `→ Đã điền sẵn. Bấm <b>CONNECT</b> để chạy.`;
+    if (res.devices.length > 1) {
+      html += `\n(còn ${res.devices.length - 1} thiết bị khác: ` +
+        res.devices.slice(1).map((x) => `${x.name}@${x.path}`).join(', ') + ')';
+    }
+    box.innerHTML = html;
+  } catch (e) {
+    box.textContent = '⚠ lỗi: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
   }
 }
 

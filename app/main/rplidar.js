@@ -325,4 +325,70 @@ class RPLidar extends EventEmitter {
   }
 }
 
-module.exports = { RPLidar };
+// Best-effort map of the GET_INFO model byte -> friendly name. Slamtec model
+// numbers aren't fully published and vary by firmware, so unknown values fall
+// back to a generic label with the raw byte. The baudrate that answered is a
+// stronger hint (A1/A2=115200, A3/S1=256000, S2/S3/T1=1000000).
+function modelName(model, baud) {
+  const known = {
+    0x18: 'RPLIDAR A1', 0x19: 'RPLIDAR A1',
+    0x28: 'RPLIDAR A2',
+    0x49: 'RPLIDAR A3', 0x41: 'RPLIDAR A3',
+    0x61: 'RPLIDAR S1',
+    0x71: 'RPLIDAR S2', 0x72: 'RPLIDAR S2',
+    0x73: 'RPLIDAR S2E',
+    0x81: 'RPLIDAR S3',
+  };
+  if (known[model]) return known[model];
+  if (baud >= 1000000) return 'RPLIDAR S2/S3 (model 0x' + model.toString(16) + ')';
+  if (baud >= 256000) return 'RPLIDAR A3/S1 (model 0x' + model.toString(16) + ')';
+  return 'RPLIDAR A1/A2 (model 0x' + model.toString(16) + ')';
+}
+
+// Open a port at one baudrate, ask GET_INFO, and resolve the device info if a
+// valid RPLIDAR response comes back within `timeoutMs`. Always closes the port.
+// Used by auto-detect to figure out which port/baud a sensor is on. Resolves
+// null on any failure (so the caller can just try the next candidate).
+function probe(path, baudRate, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    let port = null, buffer = Buffer.alloc(0), done = false, timer = null;
+    const finish = (result) => {
+      if (done) return; done = true;
+      if (timer) clearTimeout(timer);
+      try { if (port && port.isOpen) port.close(() => {}); } catch (_) {}
+      resolve(result);
+    };
+    let SP;
+    try { ({ SerialPort: SP } = require('serialport')); } catch (_) { return resolve(null); }
+    try { port = new SP({ path, baudRate, autoOpen: false }); } catch (_) { return resolve(null); }
+    port.on('error', () => finish(null));
+    port.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      // Locate a GET_INFO descriptor: 0xA5 0x5A <len LE 4B> <dataType>.
+      const k = buffer.indexOf(Buffer.from([SYNC0, SYNC1]));
+      if (k < 0 || buffer.length < k + 7) return;
+      const len = buffer.readUInt32LE(k + 2) & 0x3fffffff; // expect 20
+      if (buffer.length < k + 7 + len) return;
+      const p = buffer.subarray(k + 7, k + 7 + len);
+      const fwMinor = p[2];
+      finish({
+        model: p[0],
+        name: modelName(p[0], baudRate),
+        firmware: `${p[1]}.${fwMinor < 10 ? '0' + fwMinor : fwMinor}`,
+        hardware: p[3],
+        baudrate: baudRate,
+        path,
+      });
+    });
+    port.open((err) => {
+      if (err) return finish(null);
+      try {
+        port.write(Buffer.from([SYNC0, CMD.STOP])); // stop any running scan first
+        setTimeout(() => { buffer = Buffer.alloc(0); port.write(Buffer.from([SYNC0, CMD.GET_INFO])); }, 40);
+      } catch (_) { finish(null); }
+    });
+    timer = setTimeout(() => finish(null), timeoutMs);
+  });
+}
+
+module.exports = { RPLidar, probe, modelName };

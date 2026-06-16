@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('lidar', {
   listPorts: () => ipcRenderer.invoke('lidar:list-ports'),
+  autodetect: () => ipcRenderer.invoke('lidar:autodetect'),
   connect: (config) => ipcRenderer.invoke('lidar:connect', config),
   disconnect: () => ipcRenderer.invoke('lidar:disconnect'),
   setConfig: (config) => ipcRenderer.invoke('lidar:config', config),
