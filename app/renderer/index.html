@@ -417,9 +417,11 @@ select.input{ padding:0 6px; }
           <span class="mono" style="font-size:9.5px;letter-spacing:0.14em;color:#5b636d">OUTPUT MONITOR · live mapping</span>
           <span class="mono" id="monLabel" style="font-size:9px;color:#5b636d">NORMALIZED 0–1</span>
         </div>
-        <div style="flex:0 0 auto;margin:0 14px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);background:#000;height:152px;position:relative">
+        <div style="display:flex;justify-content:center;padding:0 14px">
+        <div id="monBox" style="flex:0 0 auto;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);background:#000;width:100%;aspect-ratio:16/9;max-height:240px;position:relative">
           <canvas id="monitor" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
           <span id="ndiBadge" style="display:none;position:absolute;top:8px;left:8px;align-items:center;gap:5px;padding:3px 8px;border-radius:20px;background:rgba(255,77,94,0.18);border:1px solid rgba(255,77,94,0.5);font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffc2c9"><span style="width:6px;height:6px;border-radius:50%;background:#ff4d5e;animation:blink 1.2s infinite"></span>NDI</span>
+        </div>
         </div>
 
         <div style="padding:10px 14px 4px" class="mono"><span style="font-size:9px;letter-spacing:0.14em;color:#5b636d">OUTPUT MODE</span></div>

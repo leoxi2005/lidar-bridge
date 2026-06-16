@@ -157,7 +157,11 @@ class Pipeline {
   // Capture the empty-room baseline. We accumulate the MAX distance per bin over a
   // handful of scans, so a person moving through during capture (a *closer* reading)
   // doesn't get baked into the wall baseline.
-  captureBackground(frames = 12) {
+  // Accumulate the MAX distance per bin over many frames. A longer window means
+  // that even if someone is walking through the room during capture, each bin gets
+  // a chance to see the wall *behind* them (the farther reading wins), so moving
+  // people don't get baked into the baseline and later erased when they stop.
+  captureBackground(frames = 60) {
     this.bg.fill(0);
     this._capFrames = frames;
     this.bgCaptured = false;

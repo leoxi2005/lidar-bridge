@@ -457,6 +457,8 @@ function buildNdiConfig() {
     const w = parseInt($('ndiW').value, 10) || 1, h = parseInt($('ndiH').value, 10) || 1;
     const g = (a, b) => (b ? g(b, a % b) : a); const k = g(w, h) || 1;
     $('ndiAspect').textContent = `${w} × ${h}  (${w / k}:${h / k})`;
+    // make the OUTPUT MONITOR preview match the chosen output aspect ratio
+    const box = $('monBox'); if (box) box.style.aspectRatio = w + ' / ' + h;
   };
   $('ndiName').onchange = () => (ndiCfg.name = $('ndiName').value);
   $('ndiW').oninput = () => { ndiCfg.w = $('ndiW').value; updAspect(); };

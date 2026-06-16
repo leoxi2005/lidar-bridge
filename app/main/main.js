@@ -552,9 +552,24 @@ function startNdi(cfg) {
     ndiSender = null;
     return { ok: false, error: e.message };
   }
-  const sf = (screen.getPrimaryDisplay().scaleFactor) || 1;
+  // An offscreen BrowserWindow's framebuffer is capped to the primary display's
+  // pixel size (and a framed window loses ~48px to its title bar — which is why a
+  // 2836x2660 request came out 1920x1032). So: render frameless, and shrink the
+  // requested W×H to fit the screen *preserving aspect* (allow exact if it fits).
+  // The NDI frame then always has the correct aspect (e.g. near-square 2836:2660);
+  // TouchDesigner can upscale to the real projector resolution losslessly.
+  const disp = screen.getPrimaryDisplay();
+  const sf = disp.scaleFactor || 1;
+  const screenPxW = Math.max(640, Math.round(disp.size.width * sf));
+  const screenPxH = Math.max(480, Math.round(disp.size.height * sf));
+  const fit = Math.min(1, screenPxW / W, screenPxH / H);
+  const renderW = Math.max(2, Math.round(W * fit));
+  const renderH = Math.max(2, Math.round(H * fit));
+  const winW = Math.max(1, Math.round(renderW / sf));
+  const winH = Math.max(1, Math.round(renderH / sf));
+  if (fit < 1) console.log(`NDI: requested ${W}x${H} exceeds screen ${screenPxW}x${screenPxH}; rendering ${renderW}x${renderH} (same aspect) — upscale in TD`);
   ndiWin = new BrowserWindow({
-    show: false, width: Math.max(1, Math.round(W / sf)), height: Math.max(1, Math.round(H / sf)),
+    show: false, frame: false, useContentSize: true, width: winW, height: winH,
     webPreferences: { offscreen: true, preload: path.join(__dirname, '..', 'projector-preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   ndiWin.loadFile(path.join(__dirname, '..', 'renderer', 'projector.html'), { search: 'clean=1' });
@@ -565,7 +580,7 @@ function startNdi(cfg) {
     const bmp = image.getBitmap(); // BGRA top-down -> NDI BGRA directly
     try { ndiSender.send(bmp, size.width, size.height); } catch (err) { /* ignore */ }
   });
-  return { ok: true };
+  return { ok: true, renderW, renderH, requestedW: W, requestedH: H, capped: fit < 1 };
 }
 function stopNdi() {
   if (ndiWin && !ndiWin.isDestroyed()) ndiWin.close();
