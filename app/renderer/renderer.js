@@ -1273,6 +1273,11 @@ function wireControls() {
 
   $('smoothToggle').onclick = () => { smoothing.on = !smoothing.on; pushSmooth(); };
   $('smoothAmt').oninput = () => { smoothing.amount = parseFloat($('smoothAmt').value); pushSmooth(); };
+  $('sensAmt').oninput = () => {
+    const v = parseFloat($('sensAmt').value);
+    $('sensLabel').textContent = v.toFixed(2);
+    window.lidar.setConfig({ sensitivity: v });
+  };
 
   $('autoLevel').onclick = () => {
     $('posX').value = '0.00'; $('posY').value = '0.00'; $('rot').value = '0.0';

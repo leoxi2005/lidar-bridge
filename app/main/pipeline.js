@@ -95,6 +95,10 @@ class Pipeline {
       smoothMin: 1.0, // mincutoff (lower = smoother but more lag)
       smoothBeta: 0.4, // speed coefficient (higher = less lag when moving fast)
       smoothDcutoff: 1.0,
+      // detection sensitivity (helps thin/far objects: fewer rays hit them)
+      minPts: CLUSTER_MINPTS,     // points needed to form a cluster
+      confirmHits: CONFIRM_HITS,  // frames a blob must persist to become a track
+      eps: CLUSTER_EPS,           // cluster radius (metres)
     };
     // per-bin scratch reused each scan
     this._dist = new Float32Array(NBINS); // metres, 0 = empty
@@ -142,6 +146,15 @@ class Pipeline {
       // 0 = light (responsive), 1 = heavy (smooth): map to mincutoff 3.0 -> 0.3 Hz
       const a = Math.max(0, Math.min(1, parseFloat(patch.smoothAmount)));
       this.cfg.smoothMin = 3.0 - a * 2.7;
+    }
+    // Detection sensitivity 0..1. Higher = detect thinner/farther objects (fewer
+    // LiDAR rays hit them at distance): drops the cluster minimum + confirm frames
+    // and widens the cluster radius. Too high = more noise/false blobs.
+    if (patch.sensitivity !== undefined) {
+      const s = Math.max(0, Math.min(1, parseFloat(patch.sensitivity)));
+      this.cfg.minPts = s > 0.66 ? 1 : s > 0.33 ? 2 : 3;
+      this.cfg.confirmHits = Math.round(4 - s * 2);   // 4 -> 2
+      this.cfg.eps = 0.3 + s * 0.25;                  // 0.30 -> 0.55 m
     }
     if (patch.placement) {
       const s = parseFloat(patch.placement.scale);
@@ -272,8 +285,10 @@ class Pipeline {
 
   // DBSCAN clusters -> person-sized blobs (centroid + radius), walls rejected by size.
   _clusterBlobs(fgPts) {
-    if (fgPts.length < CLUSTER_MINPTS) return [];
-    const groups = dbscan(fgPts, CLUSTER_EPS, CLUSTER_MINPTS);
+    const minPts = this.cfg.minPts || CLUSTER_MINPTS;
+    const eps = this.cfg.eps || CLUSTER_EPS;
+    if (fgPts.length < minPts) return [];
+    const groups = dbscan(fgPts, eps, minPts);
     const blobs = [];
     for (const g of groups) {
       if (g.length > MAX_BLOB_POINTS) continue;
@@ -315,7 +330,7 @@ class Pipeline {
           t.vy = 0.6 * t.vy + 0.4 * ((sy - t.y) / dt);
         }
         t.x = sx; t.y = sy; t.r = b.r; t.missed = 0; t.hits++;
-        if (!t.id && t.hits >= CONFIRM_HITS) {
+        if (!t.id && t.hits >= (this.cfg.confirmHits || CONFIRM_HITS)) {
           t.id = String(++this._nextId).padStart(2, '0');
           t.color = TRACK_PALETTE[(this._nextId - 1) % TRACK_PALETTE.length];
         }
