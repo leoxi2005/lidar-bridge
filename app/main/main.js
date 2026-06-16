@@ -32,12 +32,35 @@ let takeSeq = 0;
 
 let win = null;
 let source = null; // active RPLidar | Simulator (single-sensor mode)
-const pipeline = new Pipeline();
 let lastScanAt = 0;
+
+// ---- surfaces (v3) --------------------------------------------------------
+// Each projection surface (a wall, the floor, …) owns its own sensor group +
+// Pipeline (own warp/zones/tracking) + OSC namespace + NDI resolution. One
+// surface with the simple connect behaves like the previous single-output app.
+let surfaceSeq = 0;
+function makeSurface(name, oscPrefix) {
+  surfaceSeq++;
+  return {
+    id: 's' + surfaceSeq,
+    name: name || ('Mặt ' + surfaceSeq),
+    oscPrefix: oscPrefix || '',     // '' -> /lidar/...  ;  'wall1' -> /wall1/lidar/...
+    sensorIds: [],                  // connected sensors feeding this surface
+    pipeline: new Pipeline(),
+    ndi: { w: 1280, h: 720, fps: 30 },
+    lastOut: { tracks: [], zones: [] },
+  };
+}
+let surfaces = [makeSurface('Mặt 1', '')];
+let activeSurfaceId = surfaces[0].id;
+function activeSurface() { return surfaces.find((s) => s.id === activeSurfaceId) || surfaces[0]; }
+// `pipeline` always points at the active surface, so the existing warp/zones/
+// config/background IPC handlers edit whichever surface the UI has selected.
+let pipeline = surfaces[0].pipeline;
 
 // ---- multi-sensor fusion (F7) ---------------------------------------------
 let fusionMode = false;
-const fusionSources = new Map(); // id -> { sensor, pose }
+const fusionSources = new Map(); // id -> { sensor, pose, enabled }
 const fusionScans = new Map();   // id -> latest nodes[]
 let fusionTimer = null;
 
@@ -138,23 +161,62 @@ function fusionTick() {
   const periodMs = fusionLast ? now - fusionLast : 100;
   fusionLast = now;
   const dtSec = Math.min(0.5, periodMs / 1000);
-  const sensors = [];
-  for (const [id, s] of fusionSources) {
-    if (s.enabled === false) continue; // sensor toggled off — exclude from the merge
-    sensors.push({ id, nodes: fusionScans.get(id) || [], pose: s.pose || {} });
+  // sensors explicitly claimed by some surface; the default surface (index 0) with
+  // no explicit list scoops up whatever's left, so 1-surface fusion = "all sensors".
+  const claimed = new Set();
+  for (const surf of surfaces) for (const id of surf.sensorIds) claimed.add(id);
+  for (const surf of surfaces) {
+    let ids = surf.sensorIds;
+    if (!ids.length && surf === surfaces[0]) ids = [...fusionSources.keys()].filter((id) => !claimed.has(id));
+    const sensors = [];
+    for (const id of ids) {
+      const s = fusionSources.get(id);
+      if (!s || s.enabled === false) continue;
+      sensors.push({ id, nodes: fusionScans.get(id) || [], pose: s.pose || {} });
+    }
+    const frame = surf.pipeline.processFusion(sensors, dtSec);
+    surf.lastOut = { tracks: frame.tracks, zones: frame.zoneInfo || [] };
+    emitSurfaceOsc(surf);                  // every surface emits OSC under its prefix
+    if (surf.id === activeSurfaceId) {     // only the selected surface drives the UI
+      frame.periodMs = periodMs;
+      send('lidar:scan', frame);
+      latestOut = surf.lastOut;
+      broadcastProjectorFrame({
+        warpEnabled: surf.pipeline.warpEnabled,
+        tracks: frame.tracks.map((t) => ({ u: t.u, v: t.v, out: t.out, color: t.color, id: t.id })),
+        zones: surf.pipeline.zones.map((z, i) => ({
+          name: z.name, occupied: !!frame.zoneOcc[i],
+          uv: z.pts.map((p) => applyH(surf.pipeline.warpH, p[0], p[1])),
+        })),
+      });
+    }
   }
-  const frame = pipeline.processFusion(sensors, dtSec);
-  frame.periodMs = periodMs;
-  send('lidar:scan', frame);
-  latestOut = { tracks: frame.tracks, zones: frame.zoneInfo || [] };
-  broadcastProjectorFrame({
-    warpEnabled: pipeline.warpEnabled,
-    tracks: frame.tracks.map((t) => ({ u: t.u, v: t.v, out: t.out, color: t.color, id: t.id })),
-    zones: pipeline.zones.map((z, i) => ({
-      name: z.name, occupied: !!frame.zoneOcc[i],
-      uv: z.pts.map((p) => applyH(pipeline.warpH, p[0], p[1])),
-    })),
-  });
+}
+
+// Emit one surface's tracks/zones over OSC under its namespace. prefix '' -> the
+// root /lidar/... (back-compat); 'wall1' -> /wall1/lidar/... so TouchDesigner can
+// route each surface independently. Uses the slots (instancing) layout.
+function emitSurfaceOsc(surf) {
+  const base = surf.oscPrefix ? '/' + surf.oscPrefix : '';
+  const ts = surf.lastOut.tracks || [];
+  const zs = surf.lastOut.zones || [];
+  const coord = (t) => (outCfg.normalize && t.u != null ? [t.u, t.v] : [t.x, t.y]);
+  const msgs = [{ a: base + '/lidar/count', args: [{ type: 'i', value: ts.length }] }];
+  for (let i = 0; i < ts.length; i++) {
+    const t = ts[i]; const [a, b] = coord(t);
+    msgs.push({ a: `${base}/lidar/p${i}/on`, args: [{ type: 'i', value: 1 }] });
+    msgs.push({ a: `${base}/lidar/p${i}/x`, args: [{ type: 'f', value: a }] });
+    msgs.push({ a: `${base}/lidar/p${i}/y`, args: [{ type: 'f', value: b }] });
+    msgs.push({ a: `${base}/lidar/p${i}/v`, args: [{ type: 'f', value: t.vel || 0 }] });
+    msgs.push({ a: `${base}/lidar/p${i}/id`, args: [{ type: 'i', value: parseInt(t.id, 10) }] });
+  }
+  for (const z of zs) {
+    const zb = `${base}/lidar/zone/${z.slug}`;
+    msgs.push({ a: zb, args: [{ type: 'i', value: z.on ? 1 : 0 }] });
+    msgs.push({ a: zb + '/count', args: [{ type: 'i', value: z.count || 0 }] });
+    msgs.push({ a: zb + '/dwell', args: [{ type: 'f', value: z.dwell || 0 }] });
+  }
+  sender.sendBundle(msgs);
 }
 
 async function teardownFusion() {
@@ -519,7 +581,8 @@ ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
   await teardownSource();
   const { devices = [], common = {} } = payload || {};
   if (!devices.length) return { ok: false, error: 'no devices' };
-  pipeline.setConfig({ quality: common.quality, distMin: common.distMin, distMax: common.distMax });
+  // apply shared acquisition config to every surface's pipeline
+  for (const surf of surfaces) surf.pipeline.setConfig({ quality: common.quality, distMin: common.distMin, distMax: common.distMax });
   fusionMode = true;
   const connected = [];
   for (const d of devices) {
@@ -542,10 +605,50 @@ ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
   if (!fusionSources.size) { fusionMode = false; return { ok: false, error: 'không kết nối được sensor nào' }; }
   fusionLast = 0;
   const hz = outCfg.sendRate && outCfg.sendRate > 0 ? Math.min(60, outCfg.sendRate) : 30;
-  fusionTimer = setInterval(fusionTick, Math.round(1000 / hz));
-  startSender();
+  fusionTimer = setInterval(fusionTick, Math.round(1000 / hz)); // tick emits per-surface OSC
   send('lidar:status', `FUSION: ${fusionSources.size} sensor — ${connected.join(', ')}`);
   return { ok: true, connected: fusionSources.size };
+});
+
+// ---- surfaces IPC (v3) ----------------------------------------------------
+function surfaceInfo(s) {
+  return { id: s.id, name: s.name, oscPrefix: s.oscPrefix, sensorIds: s.sensorIds.slice(), ndi: s.ndi, active: s.id === activeSurfaceId };
+}
+ipcMain.handle('lidar:surfaces-list', async () => ({ ok: true, surfaces: surfaces.map(surfaceInfo), activeId: activeSurfaceId }));
+ipcMain.handle('lidar:surface-add', async (_e, { name, oscPrefix } = {}) => {
+  const s = makeSurface(name, oscPrefix);
+  // new surface inherits the shared acquisition config
+  s.pipeline.setConfig({ quality: pipeline.cfg.quality, distMin: pipeline.cfg.distMin, distMax: pipeline.cfg.distMax });
+  surfaces.push(s);
+  return { ok: true, surfaces: surfaces.map(surfaceInfo), id: s.id };
+});
+ipcMain.handle('lidar:surface-remove', async (_e, { id }) => {
+  if (surfaces.length <= 1) return { ok: false, error: 'cần ít nhất 1 mặt' };
+  surfaces = surfaces.filter((s) => s.id !== id);
+  if (activeSurfaceId === id) { activeSurfaceId = surfaces[0].id; pipeline = surfaces[0].pipeline; }
+  return { ok: true, surfaces: surfaces.map(surfaceInfo), activeId: activeSurfaceId };
+});
+ipcMain.handle('lidar:surface-update', async (_e, { id, name, oscPrefix, sensorIds, ndi }) => {
+  const s = surfaces.find((x) => x.id === id);
+  if (!s) return { ok: false, error: 'no surface' };
+  if (name !== undefined) s.name = name;
+  if (oscPrefix !== undefined) s.oscPrefix = oscPrefix.replace(/[^a-z0-9_]/gi, '');
+  if (Array.isArray(sensorIds)) s.sensorIds = sensorIds.slice();
+  if (ndi) s.ndi = Object.assign(s.ndi, ndi);
+  return { ok: true, surfaces: surfaces.map(surfaceInfo) };
+});
+// Switch which surface the warp/zones/transform/display act on. Returns that
+// surface's warp corners + zones so the renderer can load them into the UI.
+ipcMain.handle('lidar:surface-select', async (_e, { id }) => {
+  const s = surfaces.find((x) => x.id === id);
+  if (!s) return { ok: false, error: 'no surface' };
+  activeSurfaceId = id;
+  pipeline = s.pipeline; // existing warp/zones/config IPC now target this surface
+  return {
+    ok: true, activeId: id,
+    warp: { corners: s.pipeline.warpCorners, enabled: s.pipeline.warpEnabled },
+    zones: s.pipeline.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts })),
+  };
 });
 
 // live-update one sensor's pose (position/rotation/scale) during fusion
