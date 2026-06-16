@@ -1167,6 +1167,7 @@ async function doConnect() {
     ui.connected = false;
     ui.connectedId = null;
     fusionActive = false;
+    setFusionBtn(false);
     setConnStatus('disconnected', '#717a84');
     $('connectBtn').textContent = 'CONNECT';
     $('connectBtn').classList.add('green');
@@ -1633,8 +1634,25 @@ function poseOf(id) {
   const c = cfgs[id] || {};
   return { x: parseFloat(c.posX) || 0, y: parseFloat(c.posY) || 0, rot: parseFloat(c.rot) || 0, scale: parseFloat(c.scale) || 1 };
 }
+function setFusionBtn(on) {
+  const b = $('fusionBtn'); if (!b) return;
+  b.textContent = on ? '⚡ FUSION: TẮT' : '⚡ FUSION';
+  b.style.background = on ? 'rgba(201,139,255,0.28)' : 'rgba(201,139,255,0.08)';
+  b.style.borderColor = on ? 'rgba(201,139,255,0.8)' : 'rgba(201,139,255,0.4)';
+}
+
 async function fusionConnect() {
-  if (ui.connected) { await window.lidar.disconnect(); ui.connected = false; fusionActive = false; }
+  // The FUSION button is a TOGGLE: if fusion is already running, this stops it.
+  if (fusionActive) {
+    await window.lidar.disconnect();
+    ui.connected = false; fusionActive = false; ui.connectedId = null;
+    setConnStatus('FUSION đã tắt', '#717a84');
+    $('connectBtn').textContent = 'CONNECT'; $('connectBtn').classList.add('green');
+    $('protoDot').style.background = '#454c54';
+    setFusionBtn(false); renderDevices();
+    return;
+  }
+  if (ui.connected) { await window.lidar.disconnect(); ui.connected = false; } // drop single-sensor first
   saveConnFields(ui.selected);
   const devs = SENSORS.filter((s) => s.kind !== 'sim');
   if (devs.length < 1) { setConnStatus('Chưa có sensor — bấm 🔍 AUTO-DETECT trước', '#ffb000'); return; }
@@ -1654,7 +1672,7 @@ async function fusionConnect() {
     setConnStatus('FUSION ✓ ' + res.connected + ' sensor — chỉnh TRANSFORM từng con cho khớp', '#39ff7a');
     $('connectBtn').textContent = 'DISCONNECT'; $('connectBtn').classList.remove('green');
     $('protoDot').style.background = '#39ff7a';
-    renderDevices();
+    setFusionBtn(true); renderDevices();
   } else { setConnStatus('FUSION lỗi: ' + (res && res.error || '?'), '#ff4d5e'); }
 }
 
