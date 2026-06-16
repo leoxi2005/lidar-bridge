@@ -65,7 +65,7 @@ function applyDetected(found) {
 // Add a blank serial device for the user to fill in (manual port / network LiDAR).
 function addManualDevice() {
   const id = 'man_' + (++manualSeq);
-  const dev = { id, name: 'LiDAR ' + manualSeq, kind: 'manual', range: '30m', hz: '10', cfg: Object.assign({}, DEFAULT_CFG) };
+  const dev = { id, name: 'Nhập tay ' + manualSeq, kind: 'manual', range: '30m', hz: '10', cfg: Object.assign({}, DEFAULT_CFG) };
   SENSORS.push(dev);
   cfgs[id] = Object.assign({}, dev.cfg);
   selectDevice(id);
@@ -871,9 +871,12 @@ function renderDevices() {
     const meta = s.kind === 'detected'
       ? `<span>${conn} ${addr}</span><span>baud ${c.baudrate}</span>`
       : `<span>${conn} ${addr}</span>`;
+    const needsFill = s.kind === 'manual' && !c.comPort && c.connType === 'serial';
     const sub = s.kind === 'sim'
       ? `<span>built-in simulator</span>`
-      : `<span>RANGE ${s.range}</span><span>${s.hz} Hz</span>` + (s.firmware ? `<span>fw ${s.firmware}</span>` : '');
+      : needsFill
+        ? `<span style="color:#ffb000">→ điền COM/IP ở khung CONNECTION bên dưới</span>`
+        : `<span>RANGE ${s.range}</span><span>${s.hz} Hz</span>` + (s.firmware ? `<span>fw ${s.firmware}</span>` : '');
     const delBtn = s.kind === 'sim' ? '' :
       `<span class="dev-del" data-del="${s.id}" title="Xoá" style="margin-left:auto;color:#717a84;cursor:pointer;font-size:13px;padding:0 2px">×</span>`;
     card.innerHTML =
