@@ -25,7 +25,13 @@ const CMD = {
   FORCE_SCAN: 0x21,
   GET_INFO: 0x50,
   GET_HEALTH: 0x52,
+  // Motor control. A-series accessory board uses SET_MOTOR_PWM (0xF0, pwm 0..1023,
+  // default 660). S-series (S1/S2/S3) have an integrated motor driven by the HQ
+  // motor-speed command (0xA8, rpm). The A-series DTR trick does NOT spin S-series.
+  SET_MOTOR_PWM: 0xf0,
+  HQ_MOTOR_SPEED: 0xa8,
 };
+const DEFAULT_MOTOR_PWM = 660; // Slamtec default PWM for the accessory board
 
 const SYNC0 = 0xa5;
 const SYNC1 = 0x5a;
@@ -46,6 +52,10 @@ class RPLidar extends EventEmitter {
     this.info = null;
     this.health = null;
     this._scan = []; // nodes accumulated for the current revolution
+    // diagnostics — bytes/nodes seen since scan start (surfaced to the status line)
+    this._rxBytes = 0;
+    this._nodeCount = 0;
+    this._diagTimer = null;
   }
 
   // ---- public API ---------------------------------------------------------
@@ -122,16 +132,45 @@ class RPLidar extends EventEmitter {
       this._log('getHealth failed (continuing): ' + e.message);
     }
 
+    // Spin up the motor. We send BOTH motor commands unconditionally: the one the
+    // device doesn't recognise is simply ignored (we don't await a response). This
+    // covers A-series (PWM 0xF0) and S-series (HQ speed 0xA8) without model probing.
+    this._startMotor();
+    await delay(350); // give the motor time to reach speed before scanning
+
     await this._startScan();
     this.connected = true;
     this.emit('status', 'scanning');
+
+    // Diagnostics: report bytes received + nodes/sec so we can tell whether data is
+    // flowing at all (motor/scan issue) vs flowing-but-filtered (range/parse issue).
+    this._rxBytes = 0; this._nodeCount = 0;
+    if (this._diagTimer) clearInterval(this._diagTimer);
+    this._diagTimer = setInterval(() => {
+      this.emit('status', `scan rx ${this._rxBytes}B/s · ${this._nodeCount} pts/s`);
+      this._rxBytes = 0; this._nodeCount = 0;
+    }, 1000);
     return this.info;
   }
 
+  _startMotor() {
+    // A-series accessory board: PWM at default duty.
+    this._send(CMD.SET_MOTOR_PWM, [DEFAULT_MOTOR_PWM & 0xff, (DEFAULT_MOTOR_PWM >> 8) & 0xff]);
+    // S-series integrated motor: HQ speed control. 0xFFFF asks for the model default.
+    this._send(CMD.HQ_MOTOR_SPEED, [0xff, 0xff]);
+  }
+
+  _stopMotor() {
+    this._send(CMD.SET_MOTOR_PWM, [0x00, 0x00]);
+    this._send(CMD.HQ_MOTOR_SPEED, [0x00, 0x00]);
+  }
+
   async disconnect() {
+    if (this._diagTimer) { clearInterval(this._diagTimer); this._diagTimer = null; }
     try {
       this._send(CMD.STOP);
       await delay(20);
+      this._stopMotor();
       if (this._kind === 'serial') await this._setSignals({ dtr: true }); // stop motor (A1)
     } catch (_) {
       /* ignore */
@@ -177,6 +216,7 @@ class RPLidar extends EventEmitter {
   _onData(chunk) {
     this.buffer = Buffer.concat([this.buffer, chunk]);
     if (this.mode === 'scan') {
+      this._rxBytes += chunk.length;
       this._parseScan();
     } else if (this._pending && this.buffer.length >= this._pending.n) {
       const { n, resolve } = this._pending;
@@ -241,9 +281,13 @@ class RPLidar extends EventEmitter {
   async _startScan() {
     this._send(CMD.SCAN);
     const desc = await this._readDescriptor();
+    // 0x81 = legacy standard scan (5-byte nodes), what this parser expects. Some
+    // devices/modes answer with a different data type (e.g. express/dense). Warn but
+    // keep going so the diagnostics can show whether bytes are flowing at all.
     if (desc.dataType !== 0x81) {
-      throw new Error('unexpected scan data type 0x' + desc.dataType.toString(16));
+      this._log('warning: scan data type 0x' + desc.dataType.toString(16) + ' (expected 0x81 standard)');
     }
+    this._scanDataType = desc.dataType;
     this._scan = [];
     this.mode = 'scan';
     this._parseScan(); // drain anything already buffered
@@ -274,6 +318,7 @@ class RPLidar extends EventEmitter {
         this._scan = [];
       }
       this._scan.push({ angle, distMm, quality });
+      this._nodeCount += 1;
       i += 5;
     }
     this.buffer = buf.subarray(i);
