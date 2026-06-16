@@ -19,6 +19,7 @@ if (process.platform === 'darwin' && app.dock) {
 let projWin = null; // projector output window
 let ndiSender = null; // native NDI sender (koffi -> NDI runtime)
 let ndiWin = null; // offscreen window rendering the mapping for NDI
+let ndiNative = false; // true when streaming exact-resolution RGBA via IPC
 let syServer = null; // Syphon server (macOS only, optional node-syphon)
 let syWin = null; // offscreen window rendering the mapping for Syphon
 
@@ -552,6 +553,23 @@ function startNdi(cfg) {
     ndiSender = null;
     return { ok: false, error: e.message };
   }
+  const fps = parseInt(cfg.fps, 10) || 30;
+
+  // NATIVE mode: render the mapping into a fixed W×H canvas inside a hidden page and
+  // stream raw RGBA pixels here via IPC — exact resolution, not capped to the screen
+  // (heavier: ~W*H*4 bytes/frame over IPC). Used when the user wants true projector px.
+  if (cfg.native) {
+    ndiNative = true;
+    ndiWin = new BrowserWindow({
+      show: false, width: 200, height: 200,
+      webPreferences: { preload: path.join(__dirname, '..', 'projector-preload.js'), contextIsolation: true, nodeIntegration: false },
+    });
+    ndiWin.loadFile(path.join(__dirname, '..', 'renderer', 'projector.html'), { search: `clean=1&nw=${W}&nh=${H}&fps=${fps}` });
+    console.log(`NDI native: streaming exact ${W}x${H} @ ${fps}fps via IPC`);
+    return { ok: true, renderW: W, renderH: H, requestedW: W, requestedH: H, capped: false, native: true };
+  }
+
+  ndiNative = false;
   // An offscreen BrowserWindow's framebuffer is capped to the primary display's
   // pixel size (and a framed window loses ~48px to its title bar — which is why a
   // 2836x2660 request came out 1920x1032). So: render frameless, and shrink the
@@ -573,20 +591,26 @@ function startNdi(cfg) {
     webPreferences: { offscreen: true, preload: path.join(__dirname, '..', 'projector-preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   ndiWin.loadFile(path.join(__dirname, '..', 'renderer', 'projector.html'), { search: 'clean=1' });
-  ndiWin.webContents.setFrameRate(parseInt(cfg.fps, 10) || 30);
+  ndiWin.webContents.setFrameRate(fps);
   ndiWin.webContents.on('paint', (_e, _dirty, image) => {
     if (!ndiSender) return;
     const size = image.getSize();
     const bmp = image.getBitmap(); // BGRA top-down -> NDI BGRA directly
     try { ndiSender.send(bmp, size.width, size.height); } catch (err) { /* ignore */ }
   });
-  return { ok: true, renderW, renderH, requestedW: W, requestedH: H, capped: fit < 1 };
+  return { ok: true, renderW, renderH, requestedW: W, requestedH: H, capped: fit < 1, native: false };
 }
 function stopNdi() {
   if (ndiWin && !ndiWin.isDestroyed()) ndiWin.close();
   ndiWin = null;
+  ndiNative = false;
   if (ndiSender) { ndiSender.stop(); ndiSender = null; }
 }
+// Native-mode RGBA frames streamed from the hidden render page.
+ipcMain.on('ndi:frame', (_evt, msg) => {
+  if (!ndiSender || !ndiNative || !msg || !msg.buf) return;
+  try { ndiSender.send(Buffer.from(msg.buf), msg.w, msg.h, true); } catch (_) {}
+});
 ipcMain.handle('lidar:ndi-start', async (_evt, cfg) => startNdi(cfg || {}));
 ipcMain.handle('lidar:ndi-stop', async () => { stopNdi(); return { ok: true }; });
 

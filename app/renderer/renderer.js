@@ -428,7 +428,7 @@ let outputMode = 'window';
 let projectorOpen = false;
 let ndiOn = false;
 let syphonOn = false;
-const ndiCfg = { name: 'LidarBridge-Mapping', w: '1280', h: '720', fps: '30', fit: 'fit' };
+const ndiCfg = { name: 'LidarBridge-Mapping', w: '1280', h: '720', fps: '30', fit: 'fit', native: false };
 
 function buildNdiConfig() {
   const box = $('ndiConfig');
@@ -452,7 +452,17 @@ function buildNdiConfig() {
        <button class="seg ndi-fit active" data-fit="fit" style="font-size:9.5px">FIT</button>
        <button class="seg ndi-fit" data-fit="fill" style="font-size:9.5px">FILL</button>
        <button class="seg ndi-fit" data-fit="stretch" style="font-size:9.5px">STRETCH</button>
-     </div>`;
+     </div>
+     <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:7px;background:#10141a;border:1px solid var(--border)">
+       <div style="display:flex;flex-direction:column;gap:2px">
+         <span style="font-weight:600;font-size:11px;color:#dbe1e8">Đúng pixel native</span>
+         <span class="mono" style="font-size:8.5px;color:#5b636d">xuất đúng W×H · nặng hơn</span>
+       </div>
+       <button id="ndiNativeToggle" style="width:46px;height:26px;border-radius:20px;border:1px solid rgba(255,255,255,0.12);background:#0e1216;cursor:pointer;position:relative;padding:0;flex:0 0 auto">
+         <span id="ndiNativeKnob" style="position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#717a84;transition:left .15s ease"></span>
+       </button>
+     </div>
+     <div id="ndiResStatus" class="mono" style="display:none;font-size:9.5px;padding:6px 9px;border-radius:6px;background:#0b0e11;border:1px solid var(--border);color:#9fe4ef;line-height:1.5"></div>`;
   const updAspect = () => {
     const w = parseInt($('ndiW').value, 10) || 1, h = parseInt($('ndiH').value, 10) || 1;
     const g = (a, b) => (b ? g(b, a % b) : a); const k = g(w, h) || 1;
@@ -469,7 +479,32 @@ function buildNdiConfig() {
   });
   box.querySelectorAll('.ndi-fps').forEach((b) => b.onclick = () => { ndiCfg.fps = b.getAttribute('data-fps'); box.querySelectorAll('.ndi-fps').forEach((x) => x.classList.toggle('active', x === b)); });
   box.querySelectorAll('.ndi-fit').forEach((b) => b.onclick = () => { ndiCfg.fit = b.getAttribute('data-fit'); box.querySelectorAll('.ndi-fit').forEach((x) => x.classList.toggle('active', x === b)); });
+  const paintNative = () => {
+    $('ndiNativeKnob').style.left = ndiCfg.native ? '24px' : '2px';
+    $('ndiNativeKnob').style.background = ndiCfg.native ? '#39ff7a' : '#717a84';
+    $('ndiNativeToggle').style.borderColor = ndiCfg.native ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.12)';
+    $('ndiNativeToggle').style.background = ndiCfg.native ? 'rgba(57,255,122,0.12)' : '#0e1216';
+  };
+  $('ndiNativeToggle').onclick = () => { ndiCfg.native = !ndiCfg.native; paintNative(); };
+  paintNative();
   updAspect();
+}
+
+// Show what NDI is actually sending (the window-framebuffer path caps to screen).
+function showNdiRes(res) {
+  const el = $('ndiResStatus'); if (!el) return;
+  if (!res || !res.ok) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  if (res.native) {
+    el.style.color = '#bff5cf';
+    el.textContent = `▶ Đang xuất NATIVE ${res.renderW}×${res.renderH} (đúng pixel)`;
+  } else if (res.capped) {
+    el.style.color = '#ffd27f';
+    el.textContent = `▶ Đang xuất ${res.renderW}×${res.renderH} (giới hạn màn hình, tỉ lệ đúng ${res.requestedW}×${res.requestedH}) — upscale trong TD, hoặc bật "Đúng pixel native"`;
+  } else {
+    el.style.color = '#9fe4ef';
+    el.textContent = `▶ Đang xuất ${res.renderW}×${res.renderH} (đúng yêu cầu)`;
+  }
 }
 
 function updateOutputAction() {
@@ -482,10 +517,10 @@ function updateOutputAction() {
 
 async function doOutputAction() {
   if (outputMode === 'ndi') {
-    if (ndiOn) { await window.lidar.ndiStop(); ndiOn = false; $('ndiBadge').style.display = 'none'; }
+    if (ndiOn) { await window.lidar.ndiStop(); ndiOn = false; $('ndiBadge').style.display = 'none'; showNdiRes(null); }
     else {
       const res = await window.lidar.ndiStart(ndiCfg);
-      if (res.ok) { ndiOn = true; $('ndiBadge').style.display = 'flex'; }
+      if (res.ok) { ndiOn = true; $('ndiBadge').style.display = 'flex'; showNdiRes(res); }
       else { setConnStatus(res.error, '#ffb000'); }
     }
     updateOutputAction();

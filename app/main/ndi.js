@@ -31,8 +31,9 @@ koffi.struct('NDIlib_video_frame_v2_t', {
   timestamp: 'int64_t',
 });
 
-const FOURCC_BGRA =
-  'B'.charCodeAt(0) | ('G'.charCodeAt(0) << 8) | ('R'.charCodeAt(0) << 16) | ('A'.charCodeAt(0) << 24);
+const fourcc = (s) => s.charCodeAt(0) | (s.charCodeAt(1) << 8) | (s.charCodeAt(2) << 16) | (s.charCodeAt(3) << 24);
+const FOURCC_BGRA = fourcc('BGRA');
+const FOURCC_RGBA = fourcc('RGBA'); // canvas getImageData is RGBA
 const FRAME_FORMAT_PROGRESSIVE = 1;
 
 function libCandidates() {
@@ -89,12 +90,12 @@ class NdiSender {
     this.fps = parseInt(fps, 10) || 30;
   }
 
-  send(bgra, w, h) {
+  send(bgra, w, h, rgba) {
     if (!this.inst) return;
     this._sendVideo(this.inst, {
       xres: w,
       yres: h,
-      FourCC: FOURCC_BGRA,
+      FourCC: rgba ? FOURCC_RGBA : FOURCC_BGRA,
       frame_rate_N: this.fps,
       frame_rate_D: 1,
       picture_aspect_ratio: 0, // 0 => square pixels (xres/yres)

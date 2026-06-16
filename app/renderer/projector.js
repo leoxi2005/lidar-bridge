@@ -18,8 +18,10 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-function draw() {
-  const W = innerWidth, H = innerHeight;
+// Draw the mapping into any context at any size. `ctx` here shadows the global
+// canvas context, so the same code renders the visible window OR a fixed native-
+// resolution offscreen canvas for NDI.
+function renderScene(ctx, W, H) {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = opts.bright;
@@ -90,8 +92,9 @@ function draw() {
     if (opts.labels) { ctx.fillStyle = '#d6dde4'; ctx.font = "10px 'IBM Plex Mono'"; ctx.fillText(t.id, x + 9, y + 3); }
   }
   ctx.globalAlpha = 1;
-  requestAnimationFrame(draw);
 }
+
+function draw() { renderScene(ctx, innerWidth, innerHeight); requestAnimationFrame(draw); }
 
 function setBtn(id, on) { $(id).classList.toggle('on', on); }
 function applyChrome() { $('topChrome').classList.toggle('hidden', !opts.chrome); $('botChrome').classList.toggle('hidden', !opts.chrome); }
@@ -129,9 +132,28 @@ window.projector.onFrame((f) => {
 });
 
 // clean mode (used by the off-screen Syphon/NDI render): no chrome, no grid
-if (new URLSearchParams(location.search).has('clean')) {
+const params = new URLSearchParams(location.search);
+if (params.has('clean')) {
   opts.grid = false; opts.labels = false; opts.chrome = false;
   applyChrome(); setBtn('bGrid', false); setBtn('bLabels', false);
+}
+
+// NATIVE NDI mode: render the clean mapping into a fixed nw×nh offscreen canvas
+// (independent of window/screen size) and stream the raw RGBA pixels to the main
+// process, which forwards them to NDI. This achieves the exact requested
+// resolution that the window-framebuffer path can't exceed.
+const nw = parseInt(params.get('nw'), 10), nh = parseInt(params.get('nh'), 10);
+if (params.has('clean') && nw > 0 && nh > 0 && window.projector && window.projector.ndiFrame) {
+  const ncanvas = document.createElement('canvas');
+  ncanvas.width = nw; ncanvas.height = nh;
+  const nctx = ncanvas.getContext('2d', { willReadFrequently: true });
+  const fps = Math.max(1, Math.min(60, parseInt(params.get('fps'), 10) || 30));
+  const period = Math.round(1000 / fps);
+  setInterval(() => {
+    renderScene(nctx, nw, nh);
+    const img = nctx.getImageData(0, 0, nw, nh); // RGBA, top-down
+    try { window.projector.ndiFrame(img.data.buffer, nw, nh); } catch (_) {}
+  }, period);
 }
 
 resize();
