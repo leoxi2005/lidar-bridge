@@ -11,15 +11,16 @@ const POINT_FADE = 900; // ms — a ray fades out over this window
 const SWEEP_PERIOD = 0.85; // s per revolution (cosmetic)
 const NBINS = 720; // angle bins for the point cloud (0.5° each)
 
-// ---- device catalogue (mirrors the prototype's SENSORS) -------------------
-const SENSORS = [
-  { id: 'a3', name: 'RPLIDAR A3', range: '25m', hz: '10',
-    cfg: { connType: 'serial', comPort: 'SIM', baudrate: '1000000', scanMode: 'express', precision: '2', distMin: '0.0', distMax: '25.0', coordSys: 'cartesian', quality: false } },
-  { id: 's2e', name: 'RPLIDAR S2E', range: '30m', hz: '10',
-    cfg: { connType: 'network', comPort: 'COM5', baudrate: '1000000', scanMode: 'standard', precision: '2', distMin: '0.0', distMax: '30.0', coordSys: 'cartesian', quality: true } },
-  { id: 'a2', name: 'RPLIDAR A2', range: '12m', hz: '10',
-    cfg: { connType: 'serial', comPort: 'COM3', baudrate: '115200', scanMode: 'standard', precision: '1', distMin: '0.0', distMax: '12.0', coordSys: 'cartesian', quality: false } },
-];
+// ---- device list ----------------------------------------------------------
+// No hardcoded LiDAR presets — the list starts with only the simulator, and real
+// devices are added by AUTO-DETECT (which probes every COM port) or "+ ADD DEVICE"
+// (manual entry). This way the panel only ever shows devices that actually exist.
+const DEFAULT_CFG = { connType: 'serial', comPort: '', baudrate: '1000000', scanMode: 'standard', precision: '2', distMin: '0.0', distMax: '30.0', coordSys: 'cartesian', quality: false };
+const SIM_DEVICE = {
+  id: 'sim', name: 'Simulator (SIM)', range: '—', hz: '10', kind: 'sim',
+  cfg: Object.assign({}, DEFAULT_CFG, { comPort: 'SIM' }),
+};
+let SENSORS = [SIM_DEVICE];
 
 const cfgs = {};
 SENSORS.forEach((s) => (cfgs[s.id] = Object.assign({}, s.cfg)));
@@ -28,9 +29,47 @@ const ui = {
   streaming: true,
   connected: false,
   connectedId: null,
-  selected: 'a3',
+  selected: 'sim',
   tab: 'track',
 };
+
+let manualSeq = 0;
+
+// Build a stable device id from a serial port path.
+function devIdForPath(path) { return 'dev_' + String(path).replace(/[^a-z0-9]/gi, '_'); }
+
+// Replace the previously-detected devices with a fresh AUTO-DETECT result set,
+// keeping SIM and any manually-added devices. Auto-selects the first found.
+function applyDetected(found) {
+  SENSORS = SENSORS.filter((s) => s.kind === 'sim' || s.kind === 'manual');
+  for (const d of found) {
+    const id = devIdForPath(d.path);
+    const dev = {
+      id, name: d.name, kind: 'detected',
+      range: d.baudrate >= 1000000 ? '30m' : d.baudrate >= 256000 ? '25m' : '12m', hz: '10',
+      firmware: d.firmware,
+      cfg: Object.assign({}, DEFAULT_CFG, { comPort: d.path, baudrate: String(d.baudrate) }),
+    };
+    if (SENSORS.find((s) => s.id === id)) { // already present — refresh its name/cfg
+      const ex = SENSORS.find((s) => s.id === id); ex.name = dev.name; ex.firmware = dev.firmware;
+      Object.assign(cfgs[id], { comPort: d.path, baudrate: String(d.baudrate) });
+    } else {
+      SENSORS.push(dev);
+      cfgs[id] = Object.assign({}, dev.cfg);
+    }
+  }
+  if (found.length) selectDevice(devIdForPath(found[0].path));
+  else renderDevices();
+}
+
+// Add a blank serial device for the user to fill in (manual port / network LiDAR).
+function addManualDevice() {
+  const id = 'man_' + (++manualSeq);
+  const dev = { id, name: 'LiDAR ' + manualSeq, kind: 'manual', range: '30m', hz: '10', cfg: Object.assign({}, DEFAULT_CFG) };
+  SENSORS.push(dev);
+  cfgs[id] = Object.assign({}, dev.cfg);
+  selectDevice(id);
+}
 
 // ---- view / canvas --------------------------------------------------------
 const wrap = $('canvasWrap');
@@ -825,19 +864,31 @@ function renderDevices() {
     const sel = ui.selected === s.id;
     const card = document.createElement('div');
     card.className = 'dev-card' + (sel ? ' sel' : '');
-    const dotColor = isOnline ? '#39ff7a' : '#ff4d5e';
+    const dotColor = isOnline ? '#39ff7a' : s.kind === 'sim' ? '#717a84' : '#ff4d5e';
     const c = cfgs[s.id];
-    const addr = c.connType === 'serial' ? c.comPort : c.ipAddr || 'NET';
-    const conn = c.connType === 'serial' ? 'SERIAL' : 'NET';
+    const addr = s.kind === 'sim' ? 'built-in' : c.connType === 'serial' ? (c.comPort || '—') : (c.ipAddr || 'NET');
+    const conn = s.kind === 'sim' ? 'SIM' : c.connType === 'serial' ? 'SERIAL' : 'NET';
+    const meta = s.kind === 'detected'
+      ? `<span>${conn} ${addr}</span><span>baud ${c.baudrate}</span>`
+      : `<span>${conn} ${addr}</span>`;
+    const sub = s.kind === 'sim'
+      ? `<span>built-in simulator</span>`
+      : `<span>RANGE ${s.range}</span><span>${s.hz} Hz</span>` + (s.firmware ? `<span>fw ${s.firmware}</span>` : '');
+    const delBtn = s.kind === 'sim' ? '' :
+      `<span class="dev-del" data-del="${s.id}" title="Xoá" style="margin-left:auto;color:#717a84;cursor:pointer;font-size:13px;padding:0 2px">×</span>`;
     card.innerHTML =
       (sel ? '<span class="selbar"></span>' : '') +
       `<div style="display:flex;align-items:center;gap:7px">
          <span class="dot" style="background:${dotColor};box-shadow:0 0 6px ${dotColor}"></span>
          <span class="dev-name" style="color:${sel ? '#e8ecf1' : '#cdd4dc'}">${s.name}</span>
+         ${delBtn}
        </div>
-       <div class="mono" style="display:flex;justify-content:space-between;font-size:9.5px;color:#5b636d"><span>${conn} ${addr}</span></div>
-       <div class="mono" style="display:flex;gap:10px;font-size:9.5px;color:#717a84"><span>RANGE ${s.range}</span><span>${s.hz} Hz</span></div>`;
-    card.onclick = () => selectDevice(s.id);
+       <div class="mono" style="display:flex;justify-content:space-between;font-size:9.5px;color:#5b636d">${meta}</div>
+       <div class="mono" style="display:flex;gap:10px;font-size:9.5px;color:#717a84">${sub}</div>`;
+    card.onclick = (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute('data-del')) { deleteDevice(s.id); return; }
+      selectDevice(s.id);
+    };
     list.appendChild(card);
   }
   $('onlineCount').textContent = online + ' ONLINE';
@@ -846,9 +897,18 @@ function renderDevices() {
 function selectDevice(id) {
   saveConnFields(ui.selected);
   ui.selected = id;
-  const s = SENSORS.find((x) => x.id === id);
+  const s = SENSORS.find((x) => x.id === id) || SIM_DEVICE;
   $('selName').textContent = s.name;
-  loadConnFields(id);
+  loadConnFields(s.id);
+  renderDevices();
+}
+
+function deleteDevice(id) {
+  if (id === 'sim') return;
+  if (ui.connected && ui.connectedId === id) return; // don't remove the live one
+  SENSORS = SENSORS.filter((s) => s.id !== id);
+  delete cfgs[id];
+  if (ui.selected === id) { ui.selected = 'sim'; $('selName').textContent = SIM_DEVICE.name; loadConnFields('sim'); }
   renderDevices();
 }
 
@@ -1027,6 +1087,7 @@ function wireControls() {
   $('qualityBtn').onclick = () => setQuality(!quality);
   $('connectBtn').onclick = doConnect;
   $('autoDetectBtn').onclick = autoDetect;
+  $('addDeviceBtn').onclick = addManualDevice;
 
   const pushDist = () => { if (ui.connected) window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value }); };
   $('distMin').onchange = pushDist;
@@ -1435,21 +1496,11 @@ async function autoDetect() {
       box.innerHTML = '✕ Không thấy RPLIDAR.\nKiểm tra: cáp/đổi cổng USB · đã cài driver CP210x/CH340 · không có app khác (RoboStudio) đang giữ cổng.';
       return;
     }
-    const d = res.devices[0];
-    // auto-fill the connection fields with the detected device
-    setConn('serial');
-    $('comPort').value = d.path;
-    $('baudrate').value = String(d.baudrate);
-    $('selName').textContent = d.name;
-    const c = cfgs[ui.selected];
-    if (c) { c.comPort = d.path; c.baudrate = String(d.baudrate); c.connType = 'serial'; }
-    let html = `✓ Tìm thấy: <span style="color:#39ff7a">${d.name}</span>\n`;
-    html += `   cổng <b>${d.path}</b> · baud <b>${d.baudrate}</b> · fw ${d.firmware}\n`;
-    html += `→ Đã điền sẵn. Bấm <b>CONNECT</b> để chạy.`;
-    if (res.devices.length > 1) {
-      html += `\n(còn ${res.devices.length - 1} thiết bị khác: ` +
-        res.devices.slice(1).map((x) => `${x.name}@${x.path}`).join(', ') + ')';
-    }
+    // Put every detected LiDAR into the DEVICES list so the user can pick one.
+    applyDetected(res.devices);
+    const n = res.devices.length;
+    let html = `✓ Tìm thấy <span style="color:#39ff7a">${n}</span> LiDAR — xem ở danh sách <b>DEVICES</b> phía trên, bấm chọn rồi <b>CONNECT</b>.\n`;
+    html += res.devices.map((x) => `   • ${x.name} · ${x.path} @ ${x.baudrate}`).join('\n');
     box.innerHTML = html;
   } catch (e) {
     box.textContent = '⚠ lỗi: ' + e.message;
@@ -1464,7 +1515,7 @@ function boot() {
   resize();
   new ResizeObserver(resize).observe(wrap);
   loadConnFields(ui.selected);
-  $('selName').textContent = SENSORS.find((s) => s.id === ui.selected).name;
+  $('selName').textContent = (SENSORS.find((s) => s.id === ui.selected) || SIM_DEVICE).name;
   renderDevices();
   wireControls();
   pushSmooth();
