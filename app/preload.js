@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('lidar', {
   connect: (config) => ipcRenderer.invoke('lidar:connect', config),
   connectFusion: (payload) => ipcRenderer.invoke('lidar:connect-fusion', payload),
   sensorPose: (id, pose) => ipcRenderer.invoke('lidar:sensor-pose', { id, pose }),
+  sensorEnable: (id, on) => ipcRenderer.invoke('lidar:sensor-enable', { id, on }),
   sensorBg: (id, action) => ipcRenderer.invoke('lidar:sensor-bg', { id, action }),
   disconnect: () => ipcRenderer.invoke('lidar:disconnect'),
   setConfig: (config) => ipcRenderer.invoke('lidar:config', config),

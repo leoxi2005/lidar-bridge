@@ -944,16 +944,22 @@ function renderDevices() {
         : `<span>RANGE ${s.range}</span><span>${s.hz} Hz</span>` + (s.firmware ? `<span>fw ${s.firmware}</span>` : '');
     const delBtn = s.kind === 'sim' ? '' :
       `<span class="dev-del" data-del="${s.id}" title="Xoá" style="margin-left:auto;color:#717a84;cursor:pointer;font-size:13px;padding:0 2px">×</span>`;
+    // In fusion: a per-sensor ON/OFF pill (the i-th colour matches its point cloud).
+    const enOn = !(cfgs[s.id] && cfgs[s.id].enabled === false);
+    const enPill = (fusionActive && s.kind !== 'sim') ?
+      `<span data-en="${s.id}" title="Bật/tắt sensor này" style="margin-left:auto;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:1px 7px;border-radius:10px;border:1px solid ${enOn ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.15)'};color:${enOn ? '#9dffc2' : '#717a84'};background:${enOn ? 'rgba(57,255,122,0.12)' : 'transparent'}">${enOn ? 'ON' : 'OFF'}</span>` : '';
     card.innerHTML =
       (sel ? '<span class="selbar"></span>' : '') +
       `<div style="display:flex;align-items:center;gap:7px">
          <span class="dot" style="background:${dotColor};box-shadow:0 0 6px ${dotColor}"></span>
          <span class="dev-name" style="color:${sel ? '#e8ecf1' : '#cdd4dc'}">${s.name}</span>
-         ${delBtn}
+         ${enPill}${delBtn}
        </div>
        <div class="mono" style="display:flex;justify-content:space-between;font-size:9.5px;color:#5b636d">${meta}</div>
        <div class="mono" style="display:flex;gap:10px;font-size:9.5px;color:#717a84">${sub}</div>`;
     card.onclick = (e) => {
+      const en = e.target && e.target.getAttribute && e.target.getAttribute('data-en');
+      if (en) { toggleSensor(en); return; }
       if (e.target && e.target.getAttribute && e.target.getAttribute('data-del')) { deleteDevice(s.id); return; }
       selectDevice(s.id);
     };
@@ -1637,6 +1643,7 @@ async function fusionConnect() {
     return {
       id: s.id, name: s.name, connType: c.connType, comPort: c.comPort, baudrate: c.baudrate,
       ipAddr: c.ipAddr, ipPort: c.ipPort, netProto: c.netProto, pose: poseOf(s.id),
+      enabled: c.enabled !== false,
     };
   });
   const common = { distMin: $('distMin').value, distMax: $('distMax').value, quality };
@@ -1649,6 +1656,14 @@ async function fusionConnect() {
     $('protoDot').style.background = '#39ff7a';
     renderDevices();
   } else { setConnStatus('FUSION lỗi: ' + (res && res.error || '?'), '#ff4d5e'); }
+}
+
+// Toggle one sensor's contribution to the fusion (instant, no reconnect).
+function toggleSensor(id) {
+  const c = cfgs[id]; if (!c) return;
+  c.enabled = c.enabled === false; // flip (undefined/true -> false, false -> true)
+  window.lidar.sensorEnable(id, c.enabled);
+  renderDevices();
 }
 
 // ---- ports ----------------------------------------------------------------

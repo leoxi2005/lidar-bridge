@@ -139,7 +139,10 @@ function fusionTick() {
   fusionLast = now;
   const dtSec = Math.min(0.5, periodMs / 1000);
   const sensors = [];
-  for (const [id, s] of fusionSources) sensors.push({ id, nodes: fusionScans.get(id) || [], pose: s.pose || {} });
+  for (const [id, s] of fusionSources) {
+    if (s.enabled === false) continue; // sensor toggled off — exclude from the merge
+    sensors.push({ id, nodes: fusionScans.get(id) || [], pose: s.pose || {} });
+  }
   const frame = pipeline.processFusion(sensors, dtSec);
   frame.periodMs = periodMs;
   send('lidar:scan', frame);
@@ -269,7 +272,7 @@ function stopSender() {
 }
 
 function emitOutput() {
-  if (!source) return;
+  if (!source && !fusionMode) return; // fusion has no single `source` — still emit
   const lines = [];
   // Coordinate is normalized u,v in [0,1] when warp "apply to output" is on (step 7),
   // otherwise raw world metres.
@@ -530,7 +533,7 @@ ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
       if (isSim) await sensor.connect();
       else if (d.connType === 'network') await sensor.connect({ host: d.ipAddr, port: d.ipPort, udp: d.netProto === 'udp' });
       else await sensor.connect({ path: d.comPort, baudRate: parseInt(d.baudrate, 10) || 1000000 });
-      fusionSources.set(id, { sensor, pose: d.pose || {} });
+      fusionSources.set(id, { sensor, pose: d.pose || {}, enabled: d.enabled !== false });
       connected.push(d.name || id);
     } catch (e) {
       send('lidar:status', (d.name || id) + ' failed: ' + e.message);
@@ -549,6 +552,14 @@ ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
 ipcMain.handle('lidar:sensor-pose', async (_evt, { id, pose }) => {
   const s = fusionSources.get(id);
   if (s) s.pose = pose || {};
+  return { ok: true };
+});
+
+// enable/disable one sensor's contribution to the fusion (motor stays on; just
+// excluded from the merge — instant toggle, no reconnect).
+ipcMain.handle('lidar:sensor-enable', async (_evt, { id, on }) => {
+  const s = fusionSources.get(id);
+  if (s) s.enabled = !!on;
   return { ok: true };
 });
 

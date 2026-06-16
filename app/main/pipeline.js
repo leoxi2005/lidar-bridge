@@ -168,9 +168,13 @@ class Pipeline {
     // and widens the cluster radius. Too high = more noise/false blobs.
     if (patch.sensitivity !== undefined) {
       const s = Math.max(0, Math.min(1, parseFloat(patch.sensitivity)));
-      this.cfg.minPts = s > 0.66 ? 1 : s > 0.33 ? 2 : 3;
-      this.cfg.confirmHits = Math.round(4 - s * 2);   // 4 -> 2
-      this.cfg.eps = 0.3 + s * 0.25;                  // 0.30 -> 0.55 m
+      // Floor minPts at 2 (never 1) so a single stray ray can't spawn a blob, and
+      // keep a few confirm frames so noise (random, transient) is rejected while a
+      // real far object (consistent) still confirms. This catches thin/far objects
+      // WITHOUT the single-point noise the old mapping let through.
+      this.cfg.minPts = s > 0.4 ? 2 : 3;
+      this.cfg.confirmHits = s > 0.7 ? 3 : 4;         // still require persistence
+      this.cfg.eps = 0.3 + s * 0.2;                   // 0.30 -> 0.50 m
     }
     if (patch.placement) {
       const s = parseFloat(patch.placement.scale);
