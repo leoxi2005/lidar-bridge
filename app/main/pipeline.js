@@ -32,12 +32,28 @@ function dbscan(pts, eps, minPts) {
   const eps2 = eps * eps;
   const visited = new Uint8Array(n);
   const cl = new Int32Array(n).fill(-1);
+  // Spatial grid (cell = eps) so a neighbour query only scans the 3x3 cells around
+  // a point instead of all n points. Turns DBSCAN from O(n^2) into ~O(n) — critical
+  // for fusion where the merged cloud is large (kept the floor/single path fast too).
+  const inv = 1 / eps;
+  const grid = new Map();
+  for (let i = 0; i < n; i++) {
+    const k = Math.floor(pts[i][0] * inv) + ',' + Math.floor(pts[i][1] * inv);
+    let a = grid.get(k); if (!a) { a = []; grid.set(k, a); } a.push(i);
+  }
   const region = (i) => {
     const out = [];
-    for (let j = 0; j < n; j++) {
-      const dx = pts[i][0] - pts[j][0];
-      const dy = pts[i][1] - pts[j][1];
-      if (dx * dx + dy * dy <= eps2) out.push(j);
+    const cx = Math.floor(pts[i][0] * inv), cy = Math.floor(pts[i][1] * inv);
+    for (let gx = cx - 1; gx <= cx + 1; gx++) {
+      for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const a = grid.get(gx + ',' + gy); if (!a) continue;
+        for (let m = 0; m < a.length; m++) {
+          const j = a[m];
+          const dx = pts[i][0] - pts[j][0];
+          const dy = pts[i][1] - pts[j][1];
+          if (dx * dx + dy * dy <= eps2) out.push(j);
+        }
+      }
     }
     return out;
   };
@@ -440,7 +456,9 @@ class Pipeline {
       let fg = 1;
       if (subtract) { const base = s.bg[idx]; fg = base > 0.001 ? (distM < base - tol ? 1 : 0) : 1; }
       if (capturing && distM > s.bg[idx]) s.bg[idx] = distM;
-      outRaw.push(wx, wy, fg, sidx);
+      // With subtract on, background points are hidden anyway — don't ship them to
+      // the renderer (smaller IPC + far less to draw = lower latency in fusion).
+      if (!subtract || fg === 1) outRaw.push(wx, wy, fg, sidx);
       if (fg === 1) fgPts.push([wx, wy]);
       count++;
     }
