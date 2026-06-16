@@ -367,7 +367,14 @@ class Pipeline {
           t.color = TRACK_PALETTE[(this._nextId - 1) % TRACK_PALETTE.length];
         }
       } else {
+        // No blob matched this frame (brief dropout / a far object that flickered
+        // out). Coast: keep gliding along the last velocity, decaying it, so the
+        // track stays smooth and its id survives until the object reappears or it
+        // settles. Prevents the freeze-then-jump and id churn on far/noisy targets.
         t.missed++;
+        t.x += (t.vx || 0) * dt;
+        t.y += (t.vy || 0) * dt;
+        t.vx *= 0.8; t.vy *= 0.8;
       }
     }
     blobs.forEach((b, i) => {

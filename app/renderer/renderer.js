@@ -944,10 +944,12 @@ function renderDevices() {
         : `<span>RANGE ${s.range}</span><span>${s.hz} Hz</span>` + (s.firmware ? `<span>fw ${s.firmware}</span>` : '');
     const delBtn = s.kind === 'sim' ? '' :
       `<span class="dev-del" data-del="${s.id}" title="Xoá" style="margin-left:auto;color:#717a84;cursor:pointer;font-size:13px;padding:0 2px">×</span>`;
-    // In fusion: a per-sensor ON/OFF pill (the i-th colour matches its point cloud).
+    // Per-sensor "use in FUSION" pill — shown for every real device, before AND
+    // during fusion. Pick which sensors to include before pressing FUSION, or
+    // toggle them live while fusion runs.
     const enOn = !(cfgs[s.id] && cfgs[s.id].enabled === false);
-    const enPill = (fusionActive && s.kind !== 'sim') ?
-      `<span data-en="${s.id}" title="Bật/tắt sensor này" style="margin-left:auto;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:1px 7px;border-radius:10px;border:1px solid ${enOn ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.15)'};color:${enOn ? '#9dffc2' : '#717a84'};background:${enOn ? 'rgba(57,255,122,0.12)' : 'transparent'}">${enOn ? 'ON' : 'OFF'}</span>` : '';
+    const enPill = (s.kind !== 'sim') ?
+      `<span data-en="${s.id}" title="Dùng con này khi FUSION (bấm để bật/tắt)" style="margin-left:auto;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:1px 7px;border-radius:10px;border:1px solid ${enOn ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.15)'};color:${enOn ? '#9dffc2' : '#717a84'};background:${enOn ? 'rgba(57,255,122,0.12)' : 'transparent'}">${enOn ? 'ON' : 'OFF'}</span>` : '';
     card.innerHTML =
       (sel ? '<span class="selbar"></span>' : '') +
       `<div style="display:flex;align-items:center;gap:7px">
@@ -1654,8 +1656,9 @@ async function fusionConnect() {
   }
   if (ui.connected) { await window.lidar.disconnect(); ui.connected = false; } // drop single-sensor first
   saveConnFields(ui.selected);
-  const devs = SENSORS.filter((s) => s.kind !== 'sim');
-  if (devs.length < 1) { setConnStatus('Chưa có sensor — bấm 🔍 AUTO-DETECT trước', '#ffb000'); return; }
+  // Only connect the sensors the user pre-selected (ON pill). Default = all ON.
+  const devs = SENSORS.filter((s) => s.kind !== 'sim' && (cfgs[s.id].enabled !== false));
+  if (devs.length < 1) { setConnStatus('Chưa chọn sensor nào (bật ON ở danh sách DEVICES) — hoặc 🔍 AUTO-DETECT trước', '#ffb000'); return; }
   const devices = devs.map((s) => {
     const c = cfgs[s.id];
     return {
