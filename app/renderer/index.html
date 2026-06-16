@@ -63,6 +63,12 @@ select.input{ padding:0 6px; }
 .dashed{ margin:8px 10px 14px; padding:8px; border-radius:7px; border:1px dashed rgba(255,255,255,0.14); background:transparent;
   color:var(--muted); cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.08em; }
 .hair{ height:1px; background:var(--hair); }
+.nudge{ width:24px; height:28px; flex:0 0 auto; border-radius:5px; border:1px solid var(--border); background:#13171c;
+  color:var(--t2); cursor:pointer; font-size:15px; line-height:1; padding:0; }
+.nudge:hover{ border-color:rgba(0,229,255,0.4); color:#cfeef5; }
+.quick{ height:22px; padding:0 7px; border-radius:5px; border:1px solid var(--border); background:#13171c;
+  color:var(--t2); cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:9.5px; }
+.quick:hover{ border-color:rgba(0,229,255,0.4); color:#cfeef5; }
 
 .dev-card{ position:relative; display:flex; flex-direction:column; gap:5px; padding:9px 10px 9px 12px; border-radius:7px;
   border:1px solid var(--border); background:var(--card); cursor:pointer; overflow:hidden; }
@@ -224,13 +230,52 @@ select.input{ padding:0 6px; }
         </div>
       </div>
 
-      <div style="padding:14px 14px 8px" class="sec-title">PLACEMENT · room map</div>
-      <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 14px 8px">
+        <span class="sec-title">TRANSFORM · vị trí · xoay · phóng</span>
+        <span id="resetXform" class="mono" style="font-size:9.5px;color:#9fe4ef;cursor:pointer;padding:2px 6px;border:1px solid rgba(0,229,255,0.25);border-radius:5px">RESET</span>
+      </div>
+      <div style="padding:0 14px;display:flex;flex-direction:column;gap:11px">
+        <!-- POSITION with nudge buttons -->
         <div class="row">
-          <label class="field" style="flex:1"><span class="lbl">POS X (m)</span><input id="posX" class="input" value="0.00" /></label>
-          <label class="field" style="flex:1"><span class="lbl">POS Y (m)</span><input id="posY" class="input" value="0.00" /></label>
-          <label class="field" style="flex:1"><span class="lbl">ROT (°)</span><input id="rot" class="input" value="0.0" /></label>
+          <label class="field" style="flex:1"><span class="lbl">POS X (m)</span>
+            <div style="display:flex;gap:3px;align-items:center">
+              <button class="nudge" data-nudge="posX" data-d="-0.1">−</button>
+              <input id="posX" class="input" style="text-align:center" value="0.00" />
+              <button class="nudge" data-nudge="posX" data-d="0.1">+</button>
+            </div>
+          </label>
+          <label class="field" style="flex:1"><span class="lbl">POS Y (m)</span>
+            <div style="display:flex;gap:3px;align-items:center">
+              <button class="nudge" data-nudge="posY" data-d="-0.1">−</button>
+              <input id="posY" class="input" style="text-align:center" value="0.00" />
+              <button class="nudge" data-nudge="posY" data-d="0.1">+</button>
+            </div>
+          </label>
         </div>
+        <!-- ROTATION slider -->
+        <label class="field" style="gap:5px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span class="lbl">XOAY · ROTATION</span>
+            <span style="display:flex;gap:5px;align-items:center">
+              <button class="quick" data-rotset="-90">−90°</button>
+              <button class="quick" data-rotset="0">0°</button>
+              <button class="quick" data-rotset="90">+90°</button>
+              <input id="rot" class="input" style="width:54px;text-align:center;padding:3px 4px" value="0.0" />
+            </span>
+          </div>
+          <input id="rotSlider" type="range" min="-180" max="180" step="1" value="0" style="width:100%;accent-color:#00e5ff">
+        </label>
+        <!-- SCALE slider -->
+        <label class="field" style="gap:5px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span class="lbl">PHÓNG · SCALE</span>
+            <span style="display:flex;gap:5px;align-items:center">
+              <button class="quick" data-scaleset="1">1.00×</button>
+              <input id="scaleNum" class="input" style="width:54px;text-align:center;padding:3px 4px" value="1.00" />
+            </span>
+          </div>
+          <input id="scaleSlider" type="range" min="0.2" max="3" step="0.01" value="1" style="width:100%;accent-color:#00e5ff">
+        </label>
         <button id="autoLevel" class="prim" style="border-color:rgba(0,229,255,0.25);background:rgba(0,229,255,0.06);color:#9fe4ef">AUTO-LEVEL FLOOR PLANE</button>
       </div>
 

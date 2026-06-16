@@ -930,7 +930,13 @@ function loadConnFields(id) {
   $('distMax').value = c.distMax;
   setCoord(c.coordSys);
   setQuality(c.quality);
-  $('posX').value = '0.00'; $('posY').value = '0.00'; $('rot').value = '0.0';
+  // restore this device's saved transform (default origin / no rotation / 1× scale)
+  $('posX').value = (c.posX != null ? c.posX : 0).toFixed ? Number(c.posX || 0).toFixed(2) : '0.00';
+  $('posY').value = Number(c.posY || 0).toFixed(2);
+  $('rot').value = Number(c.rot || 0).toFixed(0);
+  $('rotSlider').value = String(Number(c.rot || 0));
+  $('scaleNum').value = Number(c.scale || 1).toFixed(2);
+  $('scaleSlider').value = String(Number(c.scale || 1));
   pushPlacement();
 }
 
@@ -949,8 +955,35 @@ function pushPlacement() {
     x: parseFloat($('posX').value) || 0,
     y: parseFloat($('posY').value) || 0,
     rot: parseFloat($('rot').value) || 0,
+    scale: parseFloat($('scaleNum').value) || 1,
   };
+  // remember on the selected device so it survives device switches
+  const c = cfgs[ui.selected];
+  if (c) { c.posX = placement.x; c.posY = placement.y; c.rot = placement.rot; c.scale = placement.scale; }
   window.lidar.setConfig({ placement });
+}
+
+// Keep the rotation slider <-> number and scale slider <-> number in sync, then push.
+function setRotation(deg, fromSlider) {
+  deg = Math.max(-180, Math.min(180, Math.round(parseFloat(deg) || 0)));
+  $('rot').value = deg.toFixed(0);
+  $('rotSlider').value = String(deg);
+  pushPlacement();
+}
+function setScale(s, fromSlider) {
+  s = Math.max(0.2, Math.min(3, parseFloat(s) || 1));
+  $('scaleNum').value = s.toFixed(2);
+  $('scaleSlider').value = String(s);
+  pushPlacement();
+}
+function nudgeField(id, delta) {
+  const v = (parseFloat($(id).value) || 0) + parseFloat(delta);
+  $(id).value = v.toFixed(2);
+  pushPlacement();
+}
+function resetTransform() {
+  $('posX').value = '0.00'; $('posY').value = '0.00';
+  setRotation(0); setScale(1);
 }
 
 function saveConnFields(id) {
@@ -1098,7 +1131,17 @@ function wireControls() {
 
   $('posX').onchange = pushPlacement;
   $('posY').onchange = pushPlacement;
-  $('rot').onchange = pushPlacement;
+  // rotation: slider drags live, number commits on change, quick buttons snap
+  $('rotSlider').oninput = (e) => setRotation(e.target.value, true);
+  $('rot').onchange = (e) => setRotation(e.target.value);
+  document.querySelectorAll('[data-rotset]').forEach((b) => (b.onclick = () => setRotation(b.getAttribute('data-rotset'))));
+  // scale: slider drags live, number commits on change, 1.00× button resets
+  $('scaleSlider').oninput = (e) => setScale(e.target.value, true);
+  $('scaleNum').onchange = (e) => setScale(e.target.value);
+  document.querySelectorAll('[data-scaleset]').forEach((b) => (b.onclick = () => setScale(b.getAttribute('data-scaleset'))));
+  // position nudge buttons
+  document.querySelectorAll('[data-nudge]').forEach((b) => (b.onclick = () => nudgeField(b.getAttribute('data-nudge'), b.getAttribute('data-d'))));
+  $('resetXform').onclick = resetTransform;
   // background mask
   $('captureBg').onclick = () => {
     if (!ui.connected) { setConnStatus('connect a sensor first', '#ffb000'); return; }
@@ -1542,7 +1585,7 @@ window.__collectPreset = function () {
     ipAddr: $('ipAddr').value, ipPort: $('ipPort').value,
     scanMode: scanMode, precision: precision, coordSys: coordSys, quality: quality,
     distMin: $('distMin').value, distMax: $('distMax').value,
-    placement: { x: $('posX').value, y: $('posY').value, rot: $('rot').value },
+    placement: { x: $('posX').value, y: $('posY').value, rot: $('rot').value, scale: $('scaleNum').value },
     bg: { subtract: bg.subtract, tol: bg.tol, captured: bg.captured },
     smoothing: { on: smoothing.on, amount: smoothing.amount },
     zones: zones.map(function (z) { return { name: z.name, slug: z.slug, pts: z.pts, visible: z.visible }; }),
@@ -1569,7 +1612,11 @@ window.__applyPreset = function (o) {
   if (o.distMin != null) $('distMin').value = o.distMin;
   if (o.distMax != null) $('distMax').value = o.distMax;
   if (o.quality != null) setQuality(o.quality);
-  if (o.placement) { $('posX').value = o.placement.x; $('posY').value = o.placement.y; $('rot').value = o.placement.rot; pushPlacement(); }
+  if (o.placement) {
+    $('posX').value = o.placement.x; $('posY').value = o.placement.y;
+    setRotation(o.placement.rot != null ? o.placement.rot : 0);
+    setScale(o.placement.scale != null ? o.placement.scale : 1);
+  }
   if (o.bg) {
     bg.tol = parseFloat(o.bg.tol) || 0.18;
     $('bgTol').value = bg.tol; $('bgTolLabel').textContent = Math.round(bg.tol * 100) + ' cm';

@@ -88,7 +88,7 @@ class Pipeline {
       quality: false,
       distMin: 0.0,
       distMax: 25.0,
-      placement: { x: 0, y: 0, rot: 0 },
+      placement: { x: 0, y: 0, rot: 0, scale: 1 },
       bgSubtract: false,
       bgTol: 0.18, // metres
       smooth: true, // one-euro position smoothing
@@ -144,10 +144,12 @@ class Pipeline {
       this.cfg.smoothMin = 3.0 - a * 2.7;
     }
     if (patch.placement) {
+      const s = parseFloat(patch.placement.scale);
       this.cfg.placement = {
         x: parseFloat(patch.placement.x) || 0,
         y: parseFloat(patch.placement.y) || 0,
         rot: parseFloat(patch.placement.rot) || 0,
+        scale: s > 0 ? s : 1,
       };
     }
   }
@@ -183,6 +185,7 @@ class Pipeline {
     dist.fill(0);
 
     const { x: px, y: py, rot } = this.cfg.placement;
+    const sc = this.cfg.placement.scale || 1;
     const cosR = Math.cos(rot * DEG);
     const sinR = Math.sin(rot * DEG);
 
@@ -205,8 +208,8 @@ class Pipeline {
       const idx = angleToBin(node.angle);
       const a = node.angle * DEG;
       // sensor-local cartesian, then placement (rotation + translation) -> world metres
-      const lx = Math.cos(a) * distM;
-      const ly = Math.sin(a) * distM;
+      const lx = Math.cos(a) * distM * sc;
+      const ly = Math.sin(a) * distM * sc;
       const wx = px + lx * cosR - ly * sinR;
       const wy = py + lx * sinR + ly * cosR;
 
