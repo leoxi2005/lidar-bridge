@@ -115,7 +115,9 @@ class Pipeline {
       minPts: CLUSTER_MINPTS,     // points needed to form a cluster
       confirmHits: CONFIRM_HITS,  // frames a blob must persist to become a track
       eps: CLUSTER_EPS,           // cluster radius (metres)
+      accumFrames: 1,             // temporal accumulation: cluster over the last N frames
     };
+    this._fgHist = [];            // recent foreground point sets (for accumulation)
     // per-bin scratch reused each scan
     this._dist = new Float32Array(NBINS); // metres, 0 = empty
     // background baseline (metres per bin); 0 = no baseline captured for that bin
@@ -175,6 +177,10 @@ class Pipeline {
       this.cfg.minPts = s > 0.4 ? 2 : 3;
       this.cfg.confirmHits = s > 0.7 ? 3 : 4;         // still require persistence
       this.cfg.eps = 0.3 + s * 0.2;                   // 0.30 -> 0.50 m
+      // accumulate more frames at higher sensitivity: a far/thin object that only
+      // returns 1-2 rays per scan builds up enough points to cluster, while random
+      // noise (never in the same spot twice) stays sparse and is rejected.
+      this.cfg.accumFrames = s > 0.66 ? 3 : s > 0.33 ? 2 : 1;
     }
     if (patch.placement) {
       const s = parseFloat(patch.placement.scale);
@@ -304,14 +310,15 @@ class Pipeline {
   }
 
   // DBSCAN clusters -> person-sized blobs (centroid + radius), walls rejected by size.
-  _clusterBlobs(fgPts) {
+  _clusterBlobs(fgPts, accumK) {
     const minPts = this.cfg.minPts || CLUSTER_MINPTS;
     const eps = this.cfg.eps || CLUSTER_EPS;
     if (fgPts.length < minPts) return [];
     const groups = dbscan(fgPts, eps, minPts);
+    const maxPoints = MAX_BLOB_POINTS * (accumK || 1); // N frames accumulated -> N x points
     const blobs = [];
     for (const g of groups) {
-      if (g.length > MAX_BLOB_POINTS) continue;
+      if (g.length > maxPoints) continue;
       let cx = 0, cy = 0;
       for (const i of g) { cx += fgPts[i][0]; cy += fgPts[i][1]; }
       cx /= g.length; cy /= g.length;
@@ -332,11 +339,16 @@ class Pipeline {
   _updateTracks(blobs, dt) {
     const used = new Set();
     for (const t of this.tracks) {
+      // Match against the PREDICTED position (where the track should be this frame
+      // given its velocity), not the stale last position — far fewer ID swaps when
+      // objects move or pass near each other.
+      const px = t.x + (t.vx || 0) * dt;
+      const py = t.y + (t.vy || 0) * dt;
       let best = -1;
       let bestD = MAX_JUMP;
       blobs.forEach((b, i) => {
         if (used.has(i)) return;
-        const d = Math.hypot(b.x - t.x, b.y - t.y);
+        const d = Math.hypot(b.x - px, b.y - py);
         if (d < bestD) { bestD = d; best = i; }
       });
       if (best >= 0) {
@@ -389,7 +401,20 @@ class Pipeline {
   // Cluster the (merged) world foreground points, update tracks, compute zones.
   // Shared by the single-sensor process() and the multi-sensor processFusion().
   _finishFrame(fgPts, dtSec) {
-    const blobs = this._clusterBlobs(fgPts);
+    // Temporal accumulation: cluster over the union of the last N frames' foreground
+    // points. Extends range (sparse far hits add up) and rejects spatially-random
+    // noise (it never lands in the same place twice, so it stays below minPts).
+    const K = Math.max(1, this.cfg.accumFrames || 1);
+    let clusterPts = fgPts;
+    if (K > 1) {
+      this._fgHist.push(fgPts);
+      while (this._fgHist.length > K) this._fgHist.shift();
+      clusterPts = [];
+      for (const arr of this._fgHist) for (const p of arr) clusterPts.push(p);
+    } else if (this._fgHist.length) {
+      this._fgHist.length = 0;
+    }
+    const blobs = this._clusterBlobs(clusterPts, K);
     this._updateTracks(blobs, dtSec);
     const confirmed = this.confirmedTracks();
     const nowMs = Date.now();
