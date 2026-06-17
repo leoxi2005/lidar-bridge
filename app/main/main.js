@@ -650,6 +650,31 @@ ipcMain.handle('lidar:surface-select', async (_e, { id }) => {
     zones: s.pipeline.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts })),
   };
 });
+// Export/import ALL surfaces (for presets) — name, OSC prefix, assigned sensors,
+// NDI res, warp, zones, acquisition cfg.
+ipcMain.handle('lidar:surfaces-export', async () => ({
+  ok: true,
+  surfaces: surfaces.map((s) => ({
+    name: s.name, oscPrefix: s.oscPrefix, sensorIds: s.sensorIds.slice(), ndi: s.ndi,
+    warp: { corners: s.pipeline.warpCorners, enabled: s.pipeline.warpEnabled },
+    zones: s.pipeline.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts })),
+    cfg: { distMin: s.pipeline.cfg.distMin, distMax: s.pipeline.cfg.distMax, quality: s.pipeline.cfg.quality },
+  })),
+}));
+ipcMain.handle('lidar:surfaces-import', async (_e, arr) => {
+  if (!Array.isArray(arr) || !arr.length) return { ok: false, error: 'empty' };
+  surfaces = arr.map((d) => {
+    const s = makeSurface(d.name, d.oscPrefix);
+    s.sensorIds = Array.isArray(d.sensorIds) ? d.sensorIds.slice() : [];
+    if (d.ndi) s.ndi = Object.assign(s.ndi, d.ndi);
+    if (d.cfg) s.pipeline.setConfig(d.cfg);
+    if (d.warp) s.pipeline.setWarp({ corners: d.warp.corners, enabled: d.warp.enabled });
+    if (Array.isArray(d.zones)) s.pipeline.setZones(d.zones);
+    return s;
+  });
+  activeSurfaceId = surfaces[0].id; pipeline = surfaces[0].pipeline;
+  return { ok: true, surfaces: surfaces.map(surfaceInfo), activeId: activeSurfaceId };
+});
 
 // live-update one sensor's pose (position/rotation/scale) during fusion
 ipcMain.handle('lidar:sensor-pose', async (_evt, { id, pose }) => {

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('lidar', {
   surfaceRemove: (id) => ipcRenderer.invoke('lidar:surface-remove', { id }),
   surfaceUpdate: (patch) => ipcRenderer.invoke('lidar:surface-update', patch),
   surfaceSelect: (id) => ipcRenderer.invoke('lidar:surface-select', { id }),
+  surfacesExport: () => ipcRenderer.invoke('lidar:surfaces-export'),
+  surfacesImport: (arr) => ipcRenderer.invoke('lidar:surfaces-import', arr),
   sensorBg: (id, action) => ipcRenderer.invoke('lidar:sensor-bg', { id, action }),
   disconnect: () => ipcRenderer.invoke('lidar:disconnect'),
   setConfig: (config) => ipcRenderer.invoke('lidar:config', config),

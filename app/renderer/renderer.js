@@ -481,14 +481,18 @@ function buildNdiConfig() {
     // make the OUTPUT MONITOR preview match the chosen output aspect ratio
     const box = $('monBox'); if (box) box.style.aspectRatio = w + ' / ' + h;
   };
+  // remember the NDI resolution on the surface being reviewed (per-surface res)
+  const pushNdiToSurface = () => {
+    if (activeSurfaceId) window.lidar.surfaceUpdate({ id: activeSurfaceId, ndi: { w: parseInt(ndiCfg.w, 10) || 1280, h: parseInt(ndiCfg.h, 10) || 720, fps: parseInt(ndiCfg.fps, 10) || 30 } });
+  };
   $('ndiName').onchange = () => (ndiCfg.name = $('ndiName').value);
-  $('ndiW').oninput = () => { ndiCfg.w = $('ndiW').value; updAspect(); };
-  $('ndiH').oninput = () => { ndiCfg.h = $('ndiH').value; updAspect(); };
+  $('ndiW').oninput = () => { ndiCfg.w = $('ndiW').value; updAspect(); pushNdiToSurface(); };
+  $('ndiH').oninput = () => { ndiCfg.h = $('ndiH').value; updAspect(); pushNdiToSurface(); };
   box.querySelectorAll('.ndi-presets').forEach((b) => b.onclick = () => {
     const [w, h] = b.getAttribute('data-preset').split('x');
-    $('ndiW').value = w; $('ndiH').value = h; ndiCfg.w = w; ndiCfg.h = h; updAspect();
+    $('ndiW').value = w; $('ndiH').value = h; ndiCfg.w = w; ndiCfg.h = h; updAspect(); pushNdiToSurface();
   });
-  box.querySelectorAll('.ndi-fps').forEach((b) => b.onclick = () => { ndiCfg.fps = b.getAttribute('data-fps'); box.querySelectorAll('.ndi-fps').forEach((x) => x.classList.toggle('active', x === b)); });
+  box.querySelectorAll('.ndi-fps').forEach((b) => b.onclick = () => { ndiCfg.fps = b.getAttribute('data-fps'); box.querySelectorAll('.ndi-fps').forEach((x) => x.classList.toggle('active', x === b)); pushNdiToSurface(); });
   box.querySelectorAll('.ndi-fit').forEach((b) => b.onclick = () => { ndiCfg.fit = b.getAttribute('data-fit'); box.querySelectorAll('.ndi-fit').forEach((x) => x.classList.toggle('active', x === b)); });
   const paintNative = () => {
     $('ndiNativeKnob').style.left = ndiCfg.native ? '24px' : '2px';
@@ -1738,9 +1742,20 @@ async function selectSurfaceUI(id) {
   // load this surface's warp + zones into the editing UI
   if (res.warp && res.warp.corners) { warp.corners = res.warp.corners.map((c) => c.slice()); warp.enabled = !!res.warp.enabled; recomputeWarp(); if (typeof renderCornerInputs === 'function') renderCornerInputs(); }
   if (Array.isArray(res.zones)) { zones = res.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts, visible: true, occupied: false })); if (typeof renderZoneCards === 'function') renderZoneCards(); if (typeof updateZoneBadges === 'function') updateZoneBadges(); }
+  // Step 2 — NDI reviews the selected surface at ITS resolution. Load this surface's
+  // NDI res into the fields, and if NDI is live, restart it for this surface.
+  const surf = surfacesData.find((s) => s.id === id);
+  if (surf && surf.ndi) {
+    ndiCfg.w = String(surf.ndi.w); ndiCfg.h = String(surf.ndi.h); ndiCfg.fps = String(surf.ndi.fps || 30);
+    if ($('ndiW')) {
+      $('ndiW').value = ndiCfg.w; $('ndiH').value = ndiCfg.h;
+      const box = $('monBox'); if (box) box.style.aspectRatio = ndiCfg.w + ' / ' + ndiCfg.h;
+    }
+    if (ndiOn) { await window.lidar.ndiStop(); const r = await window.lidar.ndiStart(ndiCfg); showNdiRes(r); }
+  }
   renderSurfaces();
-  const nm = (surfacesData.find((s) => s.id === id) || {}).name || '';
-  setConnStatus('Đang sửa mặt: ' + nm + ' (WARP/ZONES/TRANSFORM áp cho mặt này)', '#dcc4ff');
+  const nm = (surf || {}).name || '';
+  setConnStatus('Đang xem/sửa mặt: ' + nm + ' — WARP/ZONES/TRANSFORM/NDI áp cho mặt này', '#dcc4ff');
 }
 async function addSurfaceUI() { const res = await window.lidar.surfaceAdd(); if (res && res.ok) { surfacesData = res.surfaces; renderSurfaces(); } }
 async function removeSurfaceUI(id) { const res = await window.lidar.surfaceRemove(id); if (res && res.ok) { surfacesData = res.surfaces; activeSurfaceId = res.activeId; renderSurfaces(); } }
@@ -1823,8 +1838,8 @@ function boot() {
 }
 
 // ---- preset collect / apply (called from main via the File menu) ----------
-window.__collectPreset = function () {
-  return {
+window.__collectPreset = async function () {
+  const preset = {
     selected: ui.selected,
     cfgs: cfgs,
     connType: connType, netProto: netProto,
@@ -1841,9 +1856,12 @@ window.__collectPreset = function () {
     ndiCfg: ndiCfg,
     outputMode: outputMode,
   };
+  // v3: persist the full multi-surface layout (name/OSC/sensors/warp/zones/res)
+  try { const ex = await window.lidar.surfacesExport(); if (ex && ex.ok) preset.surfaces = ex.surfaces; } catch (_) {}
+  return preset;
 };
 
-window.__applyPreset = function (o) {
+window.__applyPreset = async function (o) {
   if (!o) return;
   if (o.cfgs) Object.keys(o.cfgs).forEach(function (k) { cfgs[k] = Object.assign({}, cfgs[k], o.cfgs[k]); });
   if (o.selected) ui.selected = o.selected;
@@ -1895,6 +1913,13 @@ window.__applyPreset = function (o) {
   window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value, quality: quality });
   $('selName').textContent = (SENSORS.find(function (s) { return s.id === ui.selected; }) || { name: '' }).name;
   renderDevices();
+  // v3: restore the full multi-surface layout, then load the active surface's view
+  if (Array.isArray(o.surfaces) && o.surfaces.length) {
+    try {
+      const r = await window.lidar.surfacesImport(o.surfaces);
+      if (r && r.ok) { surfacesData = r.surfaces; activeSurfaceId = r.activeId; renderSurfaces(); await selectSurfaceUI(activeSurfaceId); }
+    } catch (_) {}
+  }
 };
 
 boot();
