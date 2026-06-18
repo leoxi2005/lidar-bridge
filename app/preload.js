@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('lidar', {
   captureBg: () => ipcRenderer.invoke('lidar:bg-capture'),
   clearBg: () => ipcRenderer.invoke('lidar:bg-clear'),
   setZones: (zones) => ipcRenderer.invoke('lidar:zones', zones),
+  setMask: (pts) => ipcRenderer.invoke('lidar:mask', pts),
   setOutput: (cfg) => ipcRenderer.invoke('lidar:output', cfg),
   setWarp: (cfg) => ipcRenderer.invoke('lidar:warp', cfg),
   openOutput: (mode) => ipcRenderer.invoke('lidar:open-output', mode),

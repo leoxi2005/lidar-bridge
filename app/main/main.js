@@ -648,6 +648,7 @@ ipcMain.handle('lidar:surface-select', async (_e, { id }) => {
     ok: true, activeId: id,
     warp: { corners: s.pipeline.warpCorners, enabled: s.pipeline.warpEnabled },
     zones: s.pipeline.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts })),
+    mask: s.pipeline.mask.map((p) => [p[0], p[1]]),
   };
 });
 // Export/import ALL surfaces (for presets) — name, OSC prefix, assigned sensors,
@@ -658,6 +659,7 @@ ipcMain.handle('lidar:surfaces-export', async () => ({
     name: s.name, oscPrefix: s.oscPrefix, sensorIds: s.sensorIds.slice(), ndi: s.ndi,
     warp: { corners: s.pipeline.warpCorners, enabled: s.pipeline.warpEnabled },
     zones: s.pipeline.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts })),
+    mask: s.pipeline.mask.map((p) => [p[0], p[1]]),
     cfg: { distMin: s.pipeline.cfg.distMin, distMax: s.pipeline.cfg.distMax, quality: s.pipeline.cfg.quality },
   })),
 }));
@@ -670,6 +672,7 @@ ipcMain.handle('lidar:surfaces-import', async (_e, arr) => {
     if (d.cfg) s.pipeline.setConfig(d.cfg);
     if (d.warp) s.pipeline.setWarp({ corners: d.warp.corners, enabled: d.warp.enabled });
     if (Array.isArray(d.zones)) s.pipeline.setZones(d.zones);
+    if (Array.isArray(d.mask)) s.pipeline.setMask(d.mask);
     return s;
   });
   activeSurfaceId = surfaces[0].id; pipeline = surfaces[0].pipeline;
@@ -713,6 +716,12 @@ ipcMain.handle('lidar:bg-clear', async () => {
 
 ipcMain.handle('lidar:zones', async (_evt, zones) => {
   pipeline.setZones(zones);
+  return { ok: true };
+});
+
+// track mask (include polygon) for the active surface
+ipcMain.handle('lidar:mask', async (_evt, pts) => {
+  pipeline.setMask(pts);
   return { ok: true };
 });
 

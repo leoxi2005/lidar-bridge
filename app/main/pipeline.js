@@ -133,6 +133,11 @@ class Pipeline {
     this.zones = [];
     this._zoneRT = new Map(); // slug -> { since } for dwell timing
 
+    // track MASK (include region): a world-space polygon. When set, foreground
+    // points outside it are dropped before clustering — lets you trim non-square
+    // areas and cut out unused parts of the scan. Empty = no mask (track all).
+    this.mask = []; // [[x,y], ...]
+
     // warp (corner-pin homography): source corners (metres) -> unit square
     this.warpCorners = [[-3, 5], [3, 5], [3, 0.5], [-3, 0.5]];
     this.warpEnabled = false;
@@ -152,6 +157,9 @@ class Pipeline {
       pts: z.pts,
     }));
   }
+
+  setMask(pts) { this.mask = Array.isArray(pts) && pts.length >= 3 ? pts.map((p) => [p[0], p[1]]) : []; }
+  _inMask(x, y) { return this.mask.length < 3 ? true : pointInPoly(x, y, this.mask); }
 
   setConfig(patch) {
     if (patch.quality !== undefined) this.cfg.quality = !!patch.quality;
@@ -271,7 +279,7 @@ class Pipeline {
       pts[idx * 3] = wx;
       pts[idx * 3 + 1] = wy;
       pts[idx * 3 + 2] = fg;
-      if (fg === 1) fgPts.push([wx, wy]);
+      if (fg === 1 && this._inMask(wx, wy)) fgPts.push([wx, wy]); // mask: only cluster inside region
     }
 
     if (capturing) {
@@ -319,9 +327,13 @@ class Pipeline {
     const blobs = [];
     for (const g of groups) {
       if (g.length > maxPoints) continue;
-      let cx = 0, cy = 0;
-      for (const i of g) { cx += fgPts[i][0]; cy += fgPts[i][1]; }
-      cx /= g.length; cy /= g.length;
+      // Weighted centroid: each point may carry a weight at index [2] (fusion sets
+      // it from how close the point is to its sensor). In an overlap strip, the
+      // nearer sensor's points dominate, so a track crossing the seam transitions
+      // smoothly between the two LiDARs (soft handoff). No weight -> 1 (unchanged).
+      let cx = 0, cy = 0, sw = 0;
+      for (const i of g) { const w = fgPts[i][2] || 1; cx += fgPts[i][0] * w; cy += fgPts[i][1] * w; sw += w; }
+      cx /= sw; cy /= sw;
       let r = 0;
       for (const i of g) {
         const d = Math.hypot(fgPts[i][0] - cx, fgPts[i][1] - cy);
@@ -495,7 +507,9 @@ class Pipeline {
       // With subtract on, background points are hidden anyway — don't ship them to
       // the renderer (smaller IPC + far less to draw = lower latency in fusion).
       if (!subtract || fg === 1) outRaw.push(wx, wy, fg, sidx);
-      if (fg === 1) fgPts.push([wx, wy]);
+      // weight points by proximity to THIS sensor (nearer = more reliable). In the
+      // overlap between two sensors the closer one dominates the blob centroid.
+      if (fg === 1 && this._inMask(wx, wy)) fgPts.push([wx, wy, 1 / (1 + distM * distM)]);
       count++;
     }
     if (capturing) { s.capFrames--; if (s.capFrames === 0) s.bgCaptured = true; }

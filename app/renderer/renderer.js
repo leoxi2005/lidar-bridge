@@ -275,8 +275,11 @@ function setTool(tool) {
   ui.tool = tool;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-tool') === tool));
   draftRect = null;
-  if (tool === 'zone') { draft = []; $('draftBanner').style.display = 'flex'; $('draftCount').textContent = '0 pts'; }
-  else { draft = []; $('draftBanner').style.display = 'none'; }
+  draft = [];
+  $('draftBanner').style.display = tool === 'zone' ? 'flex' : 'none';
+  $('maskBanner').style.display = tool === 'mask' ? 'flex' : 'none';
+  if (tool === 'zone') $('draftCount').textContent = '0 pts';
+  if (tool === 'mask') { maskDraft = []; $('maskCount').textContent = (maskPts.length ? maskPts.length + ' pts (đang có mask)' : '0 pts'); }
 }
 
 function finishZone() {
@@ -284,6 +287,17 @@ function finishZone() {
   setTool('select');
 }
 function cancelDraft() { setTool('select'); }
+
+// ---- track mask (include polygon, per active surface) ---------------------
+let maskPts = [];     // committed mask polygon (world coords)
+let maskDraft = [];   // points being clicked
+function pushMask() { window.lidar.setMask(maskPts.length >= 3 ? maskPts : []); }
+function finishMask() {
+  if (maskDraft.length >= 3) { maskPts = maskDraft.slice(); pushMask(); }
+  setTool('select');
+}
+function clearMask() { maskPts = []; maskDraft = []; pushMask(); setTool('select'); }
+function cancelMask() { setTool('select'); }
 
 // ---- warp overlay + interaction -------------------------------------------
 function warpInteractive() { return ui.tool === 'warp' || ui.tab === 'warp'; }
@@ -845,6 +859,23 @@ function draw() {
     for (const p of draft) { const [sx, sy] = wts(p[0], p[1]); ctx.fillStyle = '#00e5ff'; ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, 2 * Math.PI); ctx.fill(); }
   }
 
+  // track MASK (committed = amber filled region; draft = dashed while drawing)
+  if (maskPts.length >= 3 && ui.tool !== 'mask') {
+    ctx.beginPath();
+    maskPts.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,176,0,0.05)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,176,0,0.45)'; ctx.lineWidth = 1.2; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (ui.tool === 'mask') {
+    const pts = maskDraft.length ? maskDraft : maskPts;
+    if (pts.length) {
+      ctx.strokeStyle = 'rgba(255,176,0,0.95)'; ctx.lineWidth = 1.6; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); pts.forEach((p, i) => { const [sx, sy] = wts(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.stroke(); ctx.setLineDash([]);
+      for (const p of pts) { const [sx, sy] = wts(p[0], p[1]); ctx.fillStyle = '#ffb000'; ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, 2 * Math.PI); ctx.fill(); }
+    }
+  }
+
   // sensor marker
   ctx.save();
   ctx.translate(ox, oy);
@@ -1339,6 +1370,12 @@ function wireControls() {
       draftRect = null;
       return;
     }
+    if (ui.tool === 'mask') {
+      const [wx, wy] = stw(mx, my);
+      maskDraft.push([wx, wy]);
+      $('maskCount').textContent = maskDraft.length + ' pts';
+      return;
+    }
     if (warpInteractive()) {
       // scale handle?
       if (warp._bbox) {
@@ -1488,6 +1525,9 @@ function wireControls() {
   });
   $('finishZone').onclick = finishZone;
   $('cancelZone').onclick = cancelDraft;
+  $('finishMask').onclick = finishMask;
+  $('clearMask').onclick = clearMask;
+  $('cancelMask').onclick = cancelMask;
 
   // output (OSC / TUIO)
   document.querySelectorAll('[data-proto]').forEach((b) => {
@@ -1742,6 +1782,7 @@ async function selectSurfaceUI(id) {
   // load this surface's warp + zones into the editing UI
   if (res.warp && res.warp.corners) { warp.corners = res.warp.corners.map((c) => c.slice()); warp.enabled = !!res.warp.enabled; recomputeWarp(); if (typeof renderCornerInputs === 'function') renderCornerInputs(); }
   if (Array.isArray(res.zones)) { zones = res.zones.map((z) => ({ name: z.name, slug: z.slug, pts: z.pts, visible: true, occupied: false })); if (typeof renderZoneCards === 'function') renderZoneCards(); if (typeof updateZoneBadges === 'function') updateZoneBadges(); }
+  maskPts = Array.isArray(res.mask) ? res.mask.map((p) => [p[0], p[1]]) : []; maskDraft = [];
   // Step 2 — NDI reviews the selected surface at ITS resolution. Load this surface's
   // NDI res into the fields, and if NDI is live, restart it for this surface.
   const surf = surfacesData.find((s) => s.id === id);
