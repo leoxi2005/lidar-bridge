@@ -1744,23 +1744,42 @@ function renderSurfaces() {
   const list = $('surfaceList'); if (!list) return;
   list.innerHTML = '';
   const realDevs = SENSORS.filter((s) => s.kind !== 'sim');
+  // Exclusive assignment: each sensor belongs to at most ONE surface. Map sensorId ->
+  // the surface that owns it, so its chip is locked (greyed, non-clickable) elsewhere.
+  const owner = {};
+  for (const sf of surfacesData) for (const sid of sf.sensorIds) if (owner[sid] == null) owner[sid] = sf;
   for (const surf of surfacesData) {
     const sel = surf.id === activeSurfaceId;
     const card = document.createElement('div');
     card.className = 'dev-card' + (sel ? ' sel' : '');
     const chips = realDevs.map((d) => {
       const on = surf.sensorIds.indexOf(d.id) >= 0;
-      return `<span data-asg="${surf.id}|${d.id}" style="cursor:pointer;font-size:8.5px;padding:1px 6px;border-radius:9px;border:1px solid ${on ? 'rgba(201,139,255,0.6)' : 'rgba(255,255,255,0.12)'};color:${on ? '#dcc4ff' : '#717a84'};background:${on ? 'rgba(201,139,255,0.14)' : 'transparent'}">${d.name}</span>`;
+      // Label each chip with its port/IP so two identical "RPLIDAR S2" are distinguishable.
+      const c = cfgs[d.id] || {};
+      const tag = c.connType === 'network' ? (c.ipAddr || 'net') : (c.comPort || '?');
+      const other = owner[d.id] && owner[d.id].id !== surf.id ? owner[d.id] : null;
+      if (other) {
+        // Locked: this sensor already belongs to another surface. Greyed, non-clickable.
+        return `<span title="Đã gán cho ${other.name} — mỗi sensor chỉ thuộc 1 mặt (bỏ chọn ở ${other.name} để dùng lại)" style="font-size:8.5px;padding:1px 6px;border-radius:9px;border:1px dashed rgba(255,255,255,0.08);color:#4a525b;background:transparent;cursor:not-allowed">🔒 ${d.name} · ${tag} → ${other.name}</span>`;
+      }
+      return `<span data-asg="${surf.id}|${d.id}" title="Gán ${d.name} (${tag}) cho mặt này" style="cursor:pointer;font-size:8.5px;padding:1px 6px;border-radius:9px;border:1px solid ${on ? 'rgba(201,139,255,0.6)' : 'rgba(255,255,255,0.12)'};color:${on ? '#dcc4ff' : '#717a84'};background:${on ? 'rgba(201,139,255,0.14)' : 'transparent'}">${d.name} · ${tag}</span>`;
     }).join(' ');
     const rm = surfacesData.length > 1 ? `<span data-srm="${surf.id}" title="Xoá mặt" style="margin-left:auto;color:#717a84;cursor:pointer;font-size:13px">×</span>` : '';
+    const base = '/' + ((surf.oscPrefix || 'lidar').replace(/^\/+|\/+$/g, '') || 'lidar');
+    const multi = surfacesData.length > 1;
+    const noSensor = multi && !surf.sensorIds.length;
+    const preview = noSensor
+      ? '⚠ chưa gán sensor — bấm 1 chip bên dưới để gán cho mặt này'
+      : `gửi OSC:  ${base}/count · ${base}/p0/x · ${base}/p0/y · ${base}/p0/v · ${base}/p0/id`;
     card.innerHTML =
       (sel ? '<span class="selbar"></span>' : '') +
       `<div style="display:flex;align-items:center;gap:6px">
          <input data-sname="${surf.id}" value="${surf.name}" style="background:transparent;border:none;color:${sel ? '#e8ecf1' : '#cdd4dc'};font-weight:600;font-size:11px;width:74px;outline:none"/>
          <span class="mono" style="font-size:8px;color:#5b636d">OSC/</span>
-         <input data-sosc="${surf.id}" value="${surf.oscPrefix}" placeholder="gốc" style="background:#0b0e11;border:1px solid var(--border);border-radius:4px;color:#9fe4ef;font-family:'IBM Plex Mono',monospace;font-size:8.5px;width:50px;padding:1px 4px;outline:none"/>
+         <input data-sosc="${surf.id}" value="${surf.oscPrefix}" placeholder="lidar" title="Tên namespace cho mặt này (vd wall1, wall2, floor). Địa chỉ sẽ là /tên/p0/x…" style="background:#0b0e11;border:1px solid var(--border);border-radius:4px;color:#9fe4ef;font-family:'IBM Plex Mono',monospace;font-size:8.5px;width:56px;padding:1px 4px;outline:none"/>
          ${rm}
        </div>
+       <div data-sprev="${surf.id}" class="mono" style="font-size:8px;color:${noSensor ? '#ffb000' : '#5f8a93'};margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${preview}</div>
        <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px">${chips || '<span class="mono" style="font-size:8.5px;color:#5b636d">chưa có sensor — bấm 🔍 AUTO-DETECT</span>'}</div>`;
     card.onclick = (e) => {
       const t = e.target;
@@ -1773,7 +1792,17 @@ function renderSurfaces() {
     list.appendChild(card);
   }
   list.querySelectorAll('[data-sname]').forEach((el) => (el.onchange = () => window.lidar.surfaceUpdate({ id: el.getAttribute('data-sname'), name: el.value }).then(refreshSurfaces)));
-  list.querySelectorAll('[data-sosc]').forEach((el) => (el.onchange = () => window.lidar.surfaceUpdate({ id: el.getAttribute('data-sosc'), oscPrefix: el.value }).then(refreshSurfaces)));
+  list.querySelectorAll('[data-sosc]').forEach((el) => {
+    const id = el.getAttribute('data-sosc');
+    const commit = () => window.lidar.surfaceUpdate({ id, oscPrefix: el.value }).then(refreshSurfaces);
+    el.onchange = commit;                                   // blur commits
+    el.onkeydown = (e) => { if (e.key === 'Enter') el.blur(); }; // Enter commits too
+    el.oninput = () => {                                    // live-update the address preview as you type
+      const prev = list.querySelector(`[data-sprev="${id}"]`);
+      const base = '/' + ((el.value || 'lidar').replace(/^\/+|\/+$/g, '') || 'lidar');
+      if (prev && prev.style.color !== 'rgb(255, 176, 0)') prev.textContent = `gửi OSC:  ${base}/count · ${base}/p0/x · ${base}/p0/y · ${base}/p0/v · ${base}/p0/id`;
+    };
+  });
 }
 async function selectSurfaceUI(id) {
   const res = await window.lidar.surfaceSelect(id);
@@ -1798,7 +1827,15 @@ async function selectSurfaceUI(id) {
   const nm = (surf || {}).name || '';
   setConnStatus('Đang xem/sửa mặt: ' + nm + ' — WARP/ZONES/TRANSFORM/NDI áp cho mặt này', '#dcc4ff');
 }
-async function addSurfaceUI() { const res = await window.lidar.surfaceAdd(); if (res && res.ok) { surfacesData = res.surfaces; renderSurfaces(); } }
+async function addSurfaceUI() {
+  // Give every new surface a distinct default namespace (wall2, wall3, …) so two
+  // surfaces never silently share /lidar and collide. User can rename to floor/etc.
+  const used = new Set(surfacesData.map((s) => (s.oscPrefix || 'lidar')));
+  let n = surfacesData.length + 1, pfx = 'wall' + n;
+  while (used.has(pfx)) { n++; pfx = 'wall' + n; }
+  const res = await window.lidar.surfaceAdd('Mặt ' + (surfacesData.length + 1), pfx);
+  if (res && res.ok) { surfacesData = res.surfaces; renderSurfaces(); }
+}
 async function removeSurfaceUI(id) { const res = await window.lidar.surfaceRemove(id); if (res && res.ok) { surfacesData = res.surfaces; activeSurfaceId = res.activeId; renderSurfaces(); } }
 async function toggleAssign(sid, did) {
   const surf = surfacesData.find((s) => s.id === sid); if (!surf) return;
@@ -1896,6 +1933,13 @@ window.__collectPreset = async function () {
     out: { protocol: out.protocol, host: out.host, port: out.port, sendRate: out.sendRate, format: out.format, normalize: out.normalize },
     ndiCfg: ndiCfg,
     outputMode: outputMode,
+    // Full real-device list (COM/baud/pose per sensor) so the sensor↔surface
+    // assignments resolve on reload and we can auto-reconnect exactly as saved.
+    devices: SENSORS.filter((s) => s.kind !== 'sim').map((s) => ({
+      id: s.id, name: s.name, kind: s.kind, range: s.range, hz: s.hz, firmware: s.firmware,
+      cfg: Object.assign({}, cfgs[s.id]),
+    })),
+    fusionActive: !!fusionActive,   // was multi-sensor fusion running when saved?
   };
   // v3: persist the full multi-surface layout (name/OSC/sensors/warp/zones/res)
   try { const ex = await window.lidar.surfacesExport(); if (ex && ex.ok) preset.surfaces = ex.surfaces; } catch (_) {}
@@ -1905,6 +1949,16 @@ window.__collectPreset = async function () {
 window.__applyPreset = async function (o) {
   if (!o) return;
   if (o.cfgs) Object.keys(o.cfgs).forEach(function (k) { cfgs[k] = Object.assign({}, cfgs[k], o.cfgs[k]); });
+  // Rebuild the real device list from the file (keep the built-in SIM) so every chip
+  // and surface assignment resolves to a real device with its saved COM/baud/pose.
+  if (Array.isArray(o.devices)) {
+    SENSORS = SENSORS.filter((s) => s.kind === 'sim').concat(
+      o.devices.map((d) => ({ id: d.id, name: d.name || 'RPLIDAR', kind: d.kind || 'detected', range: d.range || '30m', hz: d.hz || '10', firmware: d.firmware }))
+    );
+    o.devices.forEach((d) => { cfgs[d.id] = Object.assign({}, cfgs[d.id] || {}, d.cfg || {}); });
+    // keep manual-id counter ahead of any restored manual devices
+    o.devices.forEach((d) => { const m = /^man_(\d+)$/.exec(d.id); if (m) manualSeq = Math.max(manualSeq, parseInt(m[1], 10)); });
+  }
   if (o.selected) ui.selected = o.selected;
   if (o.connType) setConn(o.connType);
   if (o.netProto) setNetProto(o.netProto);
@@ -1960,6 +2014,13 @@ window.__applyPreset = async function (o) {
       const r = await window.lidar.surfacesImport(o.surfaces);
       if (r && r.ok) { surfacesData = r.surfaces; activeSurfaceId = r.activeId; renderSurfaces(); await selectSurfaceUI(activeSurfaceId); }
     } catch (_) {}
+  }
+  // Auto-reconnect exactly as saved: if fusion was running, reopen every sensor and
+  // re-wire each to its surface (best-effort — reports if a LiDAR is unplugged / wrong COM).
+  if (o.fusionActive && !fusionActive && SENSORS.some((s) => s.kind !== 'sim')) {
+    setConnStatus('Mở file: đang tự kết nối lại sensor theo từng mặt…', '#ffb000');
+    try { await fusionConnect(); }
+    catch (e) { setConnStatus('Tự kết nối lại lỗi: ' + (e && e.message || e) + ' — kiểm tra cổng COM', '#ff4d5e'); }
   }
 };
 

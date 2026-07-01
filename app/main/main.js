@@ -44,14 +44,14 @@ function makeSurface(name, oscPrefix) {
   return {
     id: 's' + surfaceSeq,
     name: name || ('Mặt ' + surfaceSeq),
-    oscPrefix: oscPrefix || '',     // '' -> /lidar/...  ;  'wall1' -> /wall1/lidar/...
+    oscPrefix: oscPrefix || '',     // namespace root: 'lidar' -> /lidar/...  ;  'wall1' -> /wall1/...
     sensorIds: [],                  // connected sensors feeding this surface
     pipeline: new Pipeline(),
     ndi: { w: 1280, h: 720, fps: 30 },
     lastOut: { tracks: [], zones: [] },
   };
 }
-let surfaces = [makeSurface('Mặt 1', '')];
+let surfaces = [makeSurface('Mặt 1', 'lidar')];
 let activeSurfaceId = surfaces[0].id;
 function activeSurface() { return surfaces.find((s) => s.id === activeSurfaceId) || surfaces[0]; }
 // `pipeline` always points at the active surface, so the existing warp/zones/
@@ -165,9 +165,13 @@ function fusionTick() {
   // no explicit list scoops up whatever's left, so 1-surface fusion = "all sensors".
   const claimed = new Set();
   for (const surf of surfaces) for (const id of surf.sensorIds) claimed.add(id);
+  const oscLog = [];
   for (const surf of surfaces) {
     let ids = surf.sensorIds;
-    if (!ids.length && surf === surfaces[0]) ids = [...fusionSources.keys()].filter((id) => !claimed.has(id));
+    // Only the SINGLE-surface case auto-scoops every sensor (so 1 surface = "all sensors").
+    // With multiple surfaces each wall reads ONLY the sensors explicitly assigned to it,
+    // so nothing silently piles into Mặt 1.
+    if (!ids.length && surfaces.length === 1) ids = [...fusionSources.keys()].filter((id) => !claimed.has(id));
     const sensors = [];
     for (const id of ids) {
       const s = fusionSources.get(id);
@@ -176,7 +180,7 @@ function fusionTick() {
     }
     const frame = surf.pipeline.processFusion(sensors, dtSec);
     surf.lastOut = { tracks: frame.tracks, zones: frame.zoneInfo || [] };
-    emitSurfaceOsc(surf);                  // every surface emits OSC under its prefix
+    emitSurfaceOsc(surf, oscLog);          // every surface emits OSC under its own prefix
     if (surf.id === activeSurfaceId) {     // only the selected surface drives the UI
       frame.periodMs = periodMs;
       send('lidar:scan', frame);
@@ -191,32 +195,48 @@ function fusionTick() {
       });
     }
   }
+  const nowMs = Date.now();
+  if (oscLog.length && nowMs - lastLogAt > 140) { lastLogAt = nowMs; send('lidar:osc-log', oscLog); }
 }
 
-// Emit one surface's tracks/zones over OSC under its namespace. prefix '' -> the
-// root /lidar/... (back-compat); 'wall1' -> /wall1/lidar/... so TouchDesigner can
-// route each surface independently. Uses the slots (instancing) layout.
-function emitSurfaceOsc(surf) {
-  const base = surf.oscPrefix ? '/' + surf.oscPrefix : '';
+// Base OSC namespace for a surface. Each surface's oscPrefix IS the root, so the
+// addresses stay short and self-describing:
+//   prefix 'lidar' -> /lidar/count, /lidar/p0/x   (default / single-surface, back-compat)
+//   prefix 'wall1' -> /wall1/count, /wall1/p0/x    (per-wall in an immersive room)
+function surfaceBase(surf) {
+  const pfx = (surf.oscPrefix || 'lidar').replace(/^\/+|\/+$/g, '') || 'lidar';
+  return '/' + pfx;
+}
+
+// Emit one surface's tracks/zones over OSC under its own namespace, using the slots
+// (instancing) layout. Pushes a compact one-line summary into `log` for the on-screen
+// OSC monitor so the user can SEE which wall is sending what.
+function emitSurfaceOsc(surf, log) {
+  const base = surfaceBase(surf);
   const ts = surf.lastOut.tracks || [];
   const zs = surf.lastOut.zones || [];
   const coord = (t) => (outCfg.normalize && t.u != null ? [t.u, t.v] : [t.x, t.y]);
-  const msgs = [{ a: base + '/lidar/count', args: [{ type: 'i', value: ts.length }] }];
+  const msgs = [{ a: base + '/count', args: [{ type: 'i', value: ts.length }] }];
   for (let i = 0; i < ts.length; i++) {
     const t = ts[i]; const [a, b] = coord(t);
-    msgs.push({ a: `${base}/lidar/p${i}/on`, args: [{ type: 'i', value: 1 }] });
-    msgs.push({ a: `${base}/lidar/p${i}/x`, args: [{ type: 'f', value: a }] });
-    msgs.push({ a: `${base}/lidar/p${i}/y`, args: [{ type: 'f', value: b }] });
-    msgs.push({ a: `${base}/lidar/p${i}/v`, args: [{ type: 'f', value: t.vel || 0 }] });
-    msgs.push({ a: `${base}/lidar/p${i}/id`, args: [{ type: 'i', value: parseInt(t.id, 10) }] });
+    msgs.push({ a: `${base}/p${i}/on`, args: [{ type: 'i', value: 1 }] });
+    msgs.push({ a: `${base}/p${i}/x`, args: [{ type: 'f', value: a }] });
+    msgs.push({ a: `${base}/p${i}/y`, args: [{ type: 'f', value: b }] });
+    msgs.push({ a: `${base}/p${i}/v`, args: [{ type: 'f', value: t.vel || 0 }] });
+    msgs.push({ a: `${base}/p${i}/id`, args: [{ type: 'i', value: parseInt(t.id, 10) }] });
   }
   for (const z of zs) {
-    const zb = `${base}/lidar/zone/${z.slug}`;
+    const zb = `${base}/zone/${z.slug}`;
     msgs.push({ a: zb, args: [{ type: 'i', value: z.on ? 1 : 0 }] });
     msgs.push({ a: zb + '/count', args: [{ type: 'i', value: z.count || 0 }] });
     msgs.push({ a: zb + '/dwell', args: [{ type: 'f', value: z.dwell || 0 }] });
   }
   sender.sendBundle(msgs);
+  if (log) {
+    let line = `${surf.name}  →  ${base}/count ${ts.length}`;
+    ts.slice(0, 4).forEach((t, i) => { const [a, b] = coord(t); line += `   p${i}(${a.toFixed(2)},${b.toFixed(2)})`; });
+    log.push(line);
+  }
 }
 
 async function teardownFusion() {
@@ -334,7 +354,7 @@ function stopSender() {
 }
 
 function emitOutput() {
-  if (!source && !fusionMode) return; // fusion has no single `source` — still emit
+  if (!source) return; // in FUSION mode emitSurfaceOsc() is the sole OSC sender (per-surface prefix)
   const lines = [];
   // Coordinate is normalized u,v in [0,1] when warp "apply to output" is on (step 7),
   // otherwise raw world metres.
