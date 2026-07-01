@@ -21,6 +21,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # macos-latest ships Python 3.12+, which removed distutils that node-gyp needs
+      # to rebuild the serialport native module. Pin 3.11 (still bundles distutils).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Install dependencies
         run: npm install
       - name: Build macOS dmg
