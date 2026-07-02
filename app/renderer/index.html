@@ -306,6 +306,12 @@ select.input{ padding:0 6px; }
           <div style="display:flex;justify-content:space-between"><span class="lbl">STRENGTH</span><span class="mono" id="smoothLabel" style="font-size:9.5px;color:#9fe4ef">0.50</span></div>
           <input id="smoothAmt" type="range" min="0" max="1" step="0.05" value="0.5" style="width:100%;accent-color:#39ff7a">
         </label>
+        <div style="display:flex;gap:6px">
+          <button id="respFast" class="ghost" title="Bám tay tức thì (ít trễ, hơi rung hơn)" style="flex:1;font-size:10px">⚡ Nhạy</button>
+          <button id="respBal" class="ghost" title="Cân bằng mượt / trễ" style="flex:1;font-size:10px">⚖ Cân bằng</button>
+          <button id="respSmooth" class="ghost" title="Rất êm (mượt nhất, trễ hơn)" style="flex:1;font-size:10px">🌊 Mượt</button>
+        </div>
+        <span class="mono" style="font-size:8.5px;color:#5b636d;padding:0 1px">Nhạy = ít trễ, bám sát · Mượt = êm nhưng trễ hơn</span>
         <label class="field" style="gap:5px">
           <div style="display:flex;justify-content:space-between"><span class="lbl">SENSITIVITY · vật nhỏ/xa</span><span class="mono" id="sensLabel" style="font-size:9.5px;color:#9fe4ef">0.00</span></div>
           <input id="sensAmt" type="range" min="0" max="1" step="0.1" value="0" style="width:100%;accent-color:#ffb000">

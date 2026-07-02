@@ -173,6 +173,8 @@ class Pipeline {
       const a = Math.max(0, Math.min(1, parseFloat(patch.smoothAmount)));
       this.cfg.smoothMin = 3.0 - a * 2.7;
     }
+    // Speed coefficient: higher = drops lag faster when moving (more responsive on motion).
+    if (patch.smoothBeta !== undefined) this.cfg.smoothBeta = Math.max(0, parseFloat(patch.smoothBeta) || 0);
     // Detection sensitivity 0..1. Higher = detect thinner/farther objects (fewer
     // LiDAR rays hit them at distance): drops the cluster minimum + confirm frames
     // and widens the cluster radius. Too high = more noise/false blobs.

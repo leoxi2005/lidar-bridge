@@ -1050,14 +1050,33 @@ function loadConnFields(id) {
   pushPlacement();
 }
 
-const smoothing = { on: true, amount: 0.5 };
+const smoothing = { on: true, amount: 0.5, beta: 0.4 };
 function pushSmooth() {
-  window.lidar.setConfig({ smooth: smoothing.on, smoothAmount: smoothing.amount });
+  window.lidar.setConfig({ smooth: smoothing.on, smoothAmount: smoothing.amount, smoothBeta: smoothing.beta });
   $('smoothKnob').style.left = smoothing.on ? '24px' : '2px';
   $('smoothKnob').style.background = smoothing.on ? '#39ff7a' : '#717a84';
   $('smoothToggle').style.borderColor = smoothing.on ? 'rgba(57,255,122,0.5)' : 'rgba(255,255,255,0.12)';
   $('smoothToggle').style.background = smoothing.on ? 'rgba(57,255,122,0.12)' : '#0e1216';
   $('smoothLabel').textContent = smoothing.amount.toFixed(2);
+}
+
+// One-tap tracking feel presets: trade responsiveness (low latency) vs smoothness.
+// Each sets smoothing STRENGTH + one-euro beta + detection sensitivity together.
+function applyResponsePreset(name) {
+  const P = {
+    fast:   { amount: 0.20, beta: 0.90, sens: 0.0 },  // bám tay tức thì, ít trễ
+    bal:    { amount: 0.50, beta: 0.40, sens: 0.3 },  // cân bằng
+    smooth: { amount: 0.85, beta: 0.15, sens: 0.5 },  // êm nhất, trễ hơn
+  }[name];
+  if (!P) return;
+  smoothing.on = true; smoothing.amount = P.amount; smoothing.beta = P.beta;
+  if ($('smoothAmt')) $('smoothAmt').value = P.amount;
+  pushSmooth();
+  if ($('sensAmt')) $('sensAmt').value = P.sens;
+  if ($('sensLabel')) $('sensLabel').textContent = P.sens.toFixed(2);
+  window.lidar.setConfig({ sensitivity: P.sens });
+  const lbl = name === 'fast' ? 'Nhạy — ít trễ, bám sát' : name === 'smooth' ? 'Mượt — êm nhưng trễ hơn' : 'Cân bằng';
+  setConnStatus('Tracking: ' + lbl, '#39ff7a');
 }
 
 function pushPlacement() {
@@ -1320,6 +1339,9 @@ function wireControls() {
 
   $('smoothToggle').onclick = () => { smoothing.on = !smoothing.on; pushSmooth(); };
   $('smoothAmt').oninput = () => { smoothing.amount = parseFloat($('smoothAmt').value); pushSmooth(); };
+  if ($('respFast')) $('respFast').onclick = () => applyResponsePreset('fast');
+  if ($('respBal')) $('respBal').onclick = () => applyResponsePreset('bal');
+  if ($('respSmooth')) $('respSmooth').onclick = () => applyResponsePreset('smooth');
   $('sensAmt').oninput = () => {
     const v = parseFloat($('sensAmt').value);
     $('sensLabel').textContent = v.toFixed(2);
@@ -1928,7 +1950,7 @@ window.__collectPreset = async function () {
     distMin: $('distMin').value, distMax: $('distMax').value,
     placement: { x: $('posX').value, y: $('posY').value, rot: $('rot').value, scale: $('scaleNum').value },
     bg: { subtract: bg.subtract, tol: bg.tol, captured: bg.captured },
-    smoothing: { on: smoothing.on, amount: smoothing.amount },
+    smoothing: { on: smoothing.on, amount: smoothing.amount, beta: smoothing.beta },
     zones: zones.map(function (z) { return { name: z.name, slug: z.slug, pts: z.pts, visible: z.visible }; }),
     warp: { corners: warp.corners, enabled: warp.enabled, rotStep: warp.rotStep },
     out: { protocol: out.protocol, host: out.host, port: out.port, sendRate: out.sendRate, format: out.format, normalize: out.normalize },
@@ -1985,7 +2007,7 @@ window.__applyPreset = async function (o) {
     syncBgUi(!!o.bg.captured, false);
     setBgSubtract(!!o.bg.subtract);
   }
-  if (o.smoothing) { smoothing.on = !!o.smoothing.on; smoothing.amount = parseFloat(o.smoothing.amount); if (isNaN(smoothing.amount)) smoothing.amount = 0.5; $('smoothAmt').value = smoothing.amount; pushSmooth(); }
+  if (o.smoothing) { smoothing.on = !!o.smoothing.on; smoothing.amount = parseFloat(o.smoothing.amount); if (isNaN(smoothing.amount)) smoothing.amount = 0.5; smoothing.beta = parseFloat(o.smoothing.beta); if (isNaN(smoothing.beta)) smoothing.beta = 0.4; $('smoothAmt').value = smoothing.amount; pushSmooth(); }
   if (o.zones) { zones = o.zones.map(function (z) { return { name: z.name, slug: z.slug, pts: z.pts, visible: z.visible !== false, occupied: false }; }); pushZones(); renderZoneCards(); }
   if (o.warp) {
     warp.corners = o.warp.corners; warp.rotStep = o.warp.rotStep || 15;
