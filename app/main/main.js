@@ -624,6 +624,11 @@ ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
   }
   if (!fusionSources.size) { fusionMode = false; return { ok: false, error: 'không kết nối được sensor nào' }; }
   fusionLast = 0;
+  // Point the OSC sender at the configured host/port NOW — fusionTick sends via
+  // sender.sendBundle, so without this a freshly-opened preset connects but emits
+  // nowhere until the user toggles an output option (which used to be the only
+  // path that called sender.configure).
+  sender.configure({ host: outCfg.host, port: outCfg.port });
   const hz = outCfg.sendRate && outCfg.sendRate > 0 ? Math.min(60, outCfg.sendRate) : 30;
   fusionTimer = setInterval(fusionTick, Math.round(1000 / hz)); // tick emits per-surface OSC
   send('lidar:status', `FUSION: ${fusionSources.size} sensor — ${connected.join(', ')}`);

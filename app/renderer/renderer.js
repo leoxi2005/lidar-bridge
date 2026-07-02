@@ -2017,7 +2017,13 @@ window.__applyPreset = async function (o) {
   }
   // Auto-reconnect exactly as saved: if fusion was running, reopen every sensor and
   // re-wire each to its surface (best-effort — reports if a LiDAR is unplugged / wrong COM).
-  if (o.fusionActive && !fusionActive && SENSORS.some((s) => s.kind !== 'sim')) {
+  if (o.fusionActive && SENSORS.some((s) => s.kind !== 'sim')) {
+    // If a fusion/single session is already live (opening a preset mid-run), tear it
+    // down first so we reconnect cleanly with the file's devices, poses and assignments.
+    if (fusionActive || ui.connected) {
+      try { await window.lidar.disconnect(); } catch (_) {}
+      fusionActive = false; ui.connected = false; ui.connectedId = null; setFusionBtn(false);
+    }
     setConnStatus('Mở file: đang tự kết nối lại sensor theo từng mặt…', '#ffb000');
     try { await fusionConnect(); }
     catch (e) { setConnStatus('Tự kết nối lại lỗi: ' + (e && e.message || e) + ' — kiểm tra cổng COM', '#ff4d5e'); }
