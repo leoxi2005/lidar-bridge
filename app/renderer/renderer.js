@@ -385,6 +385,7 @@ function pushWarpLive() { recomputeWarp(); window.lidar.setWarp({ corners: warp.
 function warpSnapshot() { warp.undo.push(JSON.stringify(warp.corners)); if (warp.undo.length > 80) warp.undo.shift(); warp.redo = []; updateWarpButtons(); }
 function setWarpEnabled(on) {
   warp.enabled = on;
+  out.normalize = on;   // "Apply to output" IS the normalize flag — keep them in sync so it saves right
   $('warpKnob').style.left = on ? '24px' : '2px';
   $('warpKnob').style.background = on ? '#00e5ff' : '#717a84';
   $('warpToggle').style.borderColor = on ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)';
@@ -2005,6 +2006,12 @@ window.__applyPreset = async function (o) {
     $('ndiConfig').style.display = (outputMode === 'ndi' || outputMode === 'syphon') ? 'flex' : 'none';
     updateOutputAction();
   }
+  // "Apply to output" (warp.enabled) is the single source of truth for normalized
+  // coords. Old/other presets may carry a stale out.normalize that the o.out block
+  // above wrote last — re-assert it from warp.enabled and push once, so a loaded file
+  // emits the SAME coord space it was saved in (no manual re-toggle needed).
+  out.normalize = !!warp.enabled;
+  window.lidar.setOutput(out);
   window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value, quality: quality });
   $('selName').textContent = (SENSORS.find(function (s) { return s.id === ui.selected; }) || { name: '' }).name;
   renderDevices();
