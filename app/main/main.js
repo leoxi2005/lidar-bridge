@@ -240,6 +240,7 @@ function emitSurfaceOsc(surf, log) {
 }
 
 async function teardownFusion() {
+  stopFusionWatchdog();
   if (fusionTimer) { clearInterval(fusionTimer); fusionTimer = null; }
   for (const [, s] of fusionSources) {
     try { s.sensor.removeAllListeners(); await s.sensor.disconnect(); } catch (_) {}
@@ -596,6 +597,57 @@ ipcMain.handle('lidar:config', async (_evt, patch) => {
 // ---- multi-sensor fusion IPC (F7) ----------------------------------------
 // devices: [{ id, connType, comPort, baudrate, ipAddr, ipPort, netProto, pose }]
 // common:  { distMin, distMax, quality }
+// Open ONE fusion sensor: create it, wire its listeners (each 'scan' stamps that
+// sensor's own lastScanAt so the fusion watchdog can spot a single stalled unit),
+// and connect. Reused for the initial connect AND for watchdog auto-recovery.
+async function openFusionSensor(d) {
+  const id = d.id;
+  const isSim = String(d.comPort).trim().toUpperCase() === 'SIM' || d.connType === 'simulator';
+  const sensor = isSim ? new Simulator() : new RPLidar();
+  sensor.on('scan', (nodes) => {
+    fusionScans.set(id, nodes);
+    const s = fusionSources.get(id); if (s) s.lastScanAt = Date.now();
+    lastScanAt = Date.now();
+  });
+  sensor.on('status', (msg) => send('lidar:status', d.name + ': ' + String(msg)));
+  sensor.on('error', (err) => send('lidar:status', d.name + ' ERROR: ' + err.message));
+  if (isSim) await sensor.connect();
+  else if (d.connType === 'network') await sensor.connect({ host: d.ipAddr, port: d.ipPort, udp: d.netProto === 'udp' });
+  else await sensor.connect({ path: d.comPort, baudRate: parseInt(d.baudrate, 10) || 1000000 });
+  return sensor;
+}
+
+// Fusion watchdog: an RPLIDAR left idle can silently stop streaming (motor/scan
+// halts or USB power-saving) while the COM port stays open — so the app "connected"
+// but that one sensor's OSC freezes. We stamp each sensor's lastScanAt and, if it
+// goes quiet past FUSION_STALL_MS, reconnect JUST that sensor (no full re-fusion).
+let fusionWatchdog = null;
+const FUSION_STALL_MS = 3000;
+function stopFusionWatchdog() { if (fusionWatchdog) clearInterval(fusionWatchdog); fusionWatchdog = null; }
+function startFusionWatchdog() {
+  stopFusionWatchdog();
+  fusionWatchdog = setInterval(async () => {
+    if (!fusionMode) return;
+    const now = Date.now();
+    for (const [id, s] of fusionSources) {
+      if (!s || s.enabled === false || s.reconnecting) continue;
+      if (s.cfg && (String(s.cfg.comPort).trim().toUpperCase() === 'SIM' || s.cfg.connType === 'simulator')) continue;
+      if (!s.lastScanAt || now - s.lastScanAt <= FUSION_STALL_MS) continue;
+      s.reconnecting = true;
+      send('lidar:status', (s.cfg && s.cfg.name || id) + ': mất tín hiệu — tự kết nối lại…');
+      try { s.sensor.removeAllListeners(); await s.sensor.disconnect(); } catch (_) {}
+      try {
+        s.sensor = await openFusionSensor(s.cfg);
+        s.lastScanAt = Date.now();
+        send('lidar:status', (s.cfg && s.cfg.name || id) + ': đã kết nối lại ✓');
+      } catch (e) {
+        send('lidar:status', (s.cfg && s.cfg.name || id) + ': kết nối lại lỗi, thử tiếp… (' + e.message + ')');
+      }
+      s.reconnecting = false;
+    }
+  }, 1000);
+}
+
 ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
   autoReconnect = false; reconnecting = false; stopWatchdog();
   await teardownSource();
@@ -606,24 +658,17 @@ ipcMain.handle('lidar:connect-fusion', async (_evt, payload) => {
   fusionMode = true;
   const connected = [];
   for (const d of devices) {
-    const isSim = String(d.comPort).trim().toUpperCase() === 'SIM' || d.connType === 'simulator';
-    const sensor = isSim ? new Simulator() : new RPLidar();
-    const id = d.id;
-    sensor.on('scan', (nodes) => { fusionScans.set(id, nodes); lastScanAt = Date.now(); });
-    sensor.on('status', (msg) => send('lidar:status', d.name + ': ' + String(msg)));
-    sensor.on('error', (err) => send('lidar:status', d.name + ' ERROR: ' + err.message));
     try {
-      if (isSim) await sensor.connect();
-      else if (d.connType === 'network') await sensor.connect({ host: d.ipAddr, port: d.ipPort, udp: d.netProto === 'udp' });
-      else await sensor.connect({ path: d.comPort, baudRate: parseInt(d.baudrate, 10) || 1000000 });
-      fusionSources.set(id, { sensor, pose: d.pose || {}, enabled: d.enabled !== false });
-      connected.push(d.name || id);
+      const sensor = await openFusionSensor(d);
+      fusionSources.set(d.id, { sensor, pose: d.pose || {}, enabled: d.enabled !== false, cfg: d, lastScanAt: Date.now(), reconnecting: false });
+      connected.push(d.name || d.id);
     } catch (e) {
-      send('lidar:status', (d.name || id) + ' failed: ' + e.message);
+      send('lidar:status', (d.name || d.id) + ' failed: ' + e.message);
     }
   }
   if (!fusionSources.size) { fusionMode = false; return { ok: false, error: 'không kết nối được sensor nào' }; }
   fusionLast = 0;
+  startFusionWatchdog();
   // Point the OSC sender at the configured host/port NOW — fusionTick sends via
   // sender.sendBundle, so without this a freshly-opened preset connects but emits
   // nowhere until the user toggles an output option (which used to be the only
