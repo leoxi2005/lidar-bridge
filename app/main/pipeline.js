@@ -13,6 +13,15 @@
 
 const NBINS = 720; // 0.5° resolution
 
+// Background subtract robustness (tilted / non-flat walls). A live reading is
+// compared not against its own bin alone but the NEAREST wall in a small angular
+// window — on a slanted wall, angular jitter and bin-edge crossing make a single
+// bin's distance wander by more than the tolerance, which otherwise leaks a
+// cloud of flickering "ghost" points that never clear. Tolerance also grows a
+// little with distance to absorb beam divergence on far walls.
+const BG_NEIGHBORS = 2;    // ± bins scanned around a point (±2 = ±1.0°)
+const BG_REL_TOL = 0.02;   // extra tolerance = 2% of the wall distance
+
 const DEG = Math.PI / 180;
 const { computeH, applyH } = require('./homography');
 
@@ -223,12 +232,78 @@ class Pipeline {
     this.cfg.bgSubtract = false;
   }
 
-  // restore a saved baseline (from a preset)
+  // restore a saved baseline (from a preset). Must be exactly NBINS long — the
+  // subtract math indexes by fixed 720-bin angle slots, so a differently-sized
+  // array (a foreign/old preset) would map to the wrong bins and mis-subtract.
+  // Reject it instead: subtract simply stays off until the user re-captures.
   setBaseline(arr) {
-    if (!arr || !arr.length) return;
+    if (!arr || arr.length !== NBINS) return;
     this.bg = Float32Array.from(arr);
     this.bgCaptured = true;
     this._capFrames = 0;
+  }
+
+  // Baseline wall distance to compare a live reading against. Absorbs the per-bin
+  // distance wander that a tilted/uneven wall produces WITHOUT punching a blind
+  // spot next to a genuinely closer object (a column / door-frame a couple of bins
+  // away). 0 means nothing usable was captured here — caller keeps the point.
+  _bgNear(bg, idx) {
+    const N = bg.length;
+    const center = bg[idx];
+    if (center > 0.001) {
+      // This bin saw the wall: only borrow a NEARER neighbour if it plausibly
+      // belongs to the SAME surface (within a band). A neighbour that is much
+      // closer is a different object (depth step) — ignore it, or standing there
+      // would erase real people.
+      const band = Math.max(0.35, center * 0.08);
+      let m = center;
+      for (let k = -BG_NEIGHBORS; k <= BG_NEIGHBORS; k++) {
+        if (!k) continue;
+        let j = idx + k; if (j < 0) j += N; else if (j >= N) j -= N;
+        const v = bg[j];
+        if (v > 0.001 && v < m && center - v <= band) m = v;
+      }
+      return m;
+    }
+    // This bin saw nothing during capture: gap-fill from the closest captured
+    // neighbour so a small unscanned/absorbing sliver doesn't flicker as a ghost.
+    // A real wide gap (doorway) has no captured neighbour -> stays 0 -> kept as
+    // foreground so people can still be tracked entering through it.
+    let best = 0, bestK = Infinity;
+    for (let k = -BG_NEIGHBORS; k <= BG_NEIGHBORS; k++) {
+      let j = idx + k; if (j < 0) j += N; else if (j >= N) j -= N;
+      const v = bg[j];
+      if (v > 0.001 && Math.abs(k) < bestK) { bestK = Math.abs(k); best = v; }
+    }
+    return best;
+  }
+
+  // Foreground test against a neighbourhood baseline. Returns 1 (person/object)
+  // only when the reading is meaningfully closer than the nearest captured wall.
+  _fgAgainst(base, distM) {
+    if (!(base > 0.001)) return 1;                 // nothing captured here -> keep
+    const eff = this.cfg.bgTol + base * BG_REL_TOL;
+    return distM < base - eff ? 1 : 0;
+  }
+
+  // --- per-sensor baselines (fusion): save into / restore from a preset --------
+  getSensorBaselines() {
+    const out = {};
+    if (this._sensors) for (const [id, s] of this._sensors) {
+      if (s.bgCaptured) out[id] = Array.from(s.bg);
+    }
+    return out;
+  }
+  setSensorBaselines(obj) {
+    if (!obj) return;
+    for (const id of Object.keys(obj)) {
+      const arr = obj[id];
+      if (!arr || arr.length !== NBINS) continue; // wrong size -> ignore (see setBaseline)
+      const s = this._sensorState(id);
+      s.bg = Float32Array.from(arr);
+      s.bgCaptured = true;
+      s.capFrames = 0;
+    }
   }
 
   // nodes: [{ angle (deg), distMm, quality }]; dtSec = seconds since previous scan
@@ -248,7 +323,6 @@ class Pipeline {
 
     const capturing = this._capFrames > 0;
     const subtract = this.cfg.bgSubtract && this.bgCaptured;
-    const tol = this.cfg.bgTol;
     const fgPts = []; // foreground world points fed to clustering
 
     let count = 0;
@@ -266,12 +340,10 @@ class Pipeline {
       const wx = px + lx * cosR - ly * sinR;
       const wy = py + lx * sinR + ly * cosR;
 
-      // SUBTRACT: a point is foreground only if meaningfully closer than the baseline.
+      // SUBTRACT: a point is foreground only if meaningfully closer than the
+      // NEAREST captured wall around this bin (tolerant to tilted/uneven walls).
       let fg = 1;
-      if (subtract) {
-        const base = this.bg[idx];
-        fg = base > 0.001 ? (distM < base - tol ? 1 : 0) : 1;
-      }
+      if (subtract) fg = this._fgAgainst(this._bgNear(this.bg, idx), distM);
 
       // accumulate baseline (max distance per bin) while capturing
       if (capturing && distM > this.bg[idx]) this.bg[idx] = distM;
@@ -492,7 +564,6 @@ class Pipeline {
     const cosR = Math.cos(rot), sinR = Math.sin(rot);
     const capturing = s.capFrames > 0;
     const subtract = this.cfg.bgSubtract && s.bgCaptured;
-    const tol = this.cfg.bgTol;
     let count = 0;
     for (const node of nodes) {
       const distM = node.distMm / 1000;
@@ -504,7 +575,7 @@ class Pipeline {
       const lx = Math.cos(a) * distM * sc, ly = Math.sin(a) * distM * sc;
       const wx = px + lx * cosR - ly * sinR, wy = py + lx * sinR + ly * cosR;
       let fg = 1;
-      if (subtract) { const base = s.bg[idx]; fg = base > 0.001 ? (distM < base - tol ? 1 : 0) : 1; }
+      if (subtract) fg = this._fgAgainst(this._bgNear(s.bg, idx), distM);
       if (capturing && distM > s.bg[idx]) s.bg[idx] = distM;
       // With subtract on, background points are hidden anyway — don't ship them to
       // the renderer (smaller IPC + far less to draw = lower latency in fusion).

@@ -97,6 +97,34 @@ function sendZones(msgs, lines) {
   }
 }
 
+// Global (whole-room) tracking settings — must be IDENTICAL on every surface, or
+// background subtract / smoothing / sensitivity only work on the wall currently
+// selected in the UI. (warp / zones / mask stay per-surface on purpose.)
+const GLOBAL_CFG_KEYS = ['bgSubtract', 'bgTol', 'smooth', 'smoothMin', 'smoothBeta', 'smoothDcutoff', 'minPts', 'confirmHits', 'eps', 'accumFrames', 'quality', 'distMin', 'distMax'];
+function snapshotGlobalCfg(src) { const o = {}; for (const k of GLOBAL_CFG_KEYS) if (src[k] !== undefined) o[k] = src[k]; return o; }
+
+// Which surface owns a sensor (exclusive assignment). Single-surface fusion scoops all.
+function surfaceOwning(sid) {
+  for (const surf of surfaces) if (surf.sensorIds.includes(sid)) return surf;
+  return surfaces.length === 1 ? surfaces[0] : null;
+}
+
+// Per-sensor empty-room baselines across ALL surfaces (fusion), keyed by sensor id.
+function collectSensorBaselines() {
+  const out = {};
+  for (const surf of surfaces) Object.assign(out, surf.pipeline.getSensorBaselines());
+  return out;
+}
+function restoreSensorBaselines(map) {
+  if (!map) return;
+  const scoop = surfaces.length === 1; // one surface owns every sensor
+  for (const surf of surfaces) {
+    const sub = {};
+    for (const sid of Object.keys(map)) if (scoop || surf.sensorIds.includes(sid)) sub[sid] = map[sid];
+    if (Object.keys(sub).length) surf.pipeline.setSensorBaselines(sub);
+  }
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -590,7 +618,16 @@ ipcMain.handle('lidar:disconnect', async () => {
 });
 
 ipcMain.handle('lidar:config', async (_evt, patch) => {
-  pipeline.setConfig(patch);
+  pipeline.setConfig(patch); // active surface (full patch, incl. per-sensor placement)
+  // Global-feel keys (subtract, tolerance, smoothing, sensitivity, range, quality)
+  // must reach EVERY surface — otherwise background subtract only affects the wall
+  // currently selected. Snapshot the active cfg AFTER setConfig so mapped values
+  // (smoothAmount->smoothMin, sensitivity->minPts/eps) copy across resolved.
+  const touchesGlobal = GLOBAL_CFG_KEYS.some((k) => k in patch) || 'smoothAmount' in patch || 'sensitivity' in patch;
+  if (touchesGlobal) {
+    const g = snapshotGlobalCfg(pipeline.cfg);
+    for (const surf of surfaces) if (surf.pipeline !== pipeline) Object.assign(surf.pipeline.cfg, g);
+  }
   return { ok: true };
 });
 
@@ -687,8 +724,9 @@ function surfaceInfo(s) {
 ipcMain.handle('lidar:surfaces-list', async () => ({ ok: true, surfaces: surfaces.map(surfaceInfo), activeId: activeSurfaceId }));
 ipcMain.handle('lidar:surface-add', async (_e, { name, oscPrefix } = {}) => {
   const s = makeSurface(name, oscPrefix);
-  // new surface inherits the shared acquisition config
-  s.pipeline.setConfig({ quality: pipeline.cfg.quality, distMin: pipeline.cfg.distMin, distMax: pipeline.cfg.distMax });
+  // new surface inherits ALL shared tracking settings (subtract, tolerance,
+  // smoothing, sensitivity, range) so a wall added after they were tuned matches.
+  Object.assign(s.pipeline.cfg, snapshotGlobalCfg(pipeline.cfg));
   surfaces.push(s);
   return { ok: true, surfaces: surfaces.map(surfaceInfo), id: s.id };
 });
@@ -735,10 +773,15 @@ ipcMain.handle('lidar:surfaces-export', async () => ({
 }));
 ipcMain.handle('lidar:surfaces-import', async (_e, arr) => {
   if (!Array.isArray(arr) || !arr.length) return { ok: false, error: 'empty' };
+  // Carry the current global tracking settings (subtract, tolerance, smoothing,
+  // sensitivity, range) onto every NEW pipeline, so rebuilding surfaces on load
+  // doesn't silently reset them to defaults on all but the active wall.
+  const gcfg = snapshotGlobalCfg(pipeline.cfg);
   surfaces = arr.map((d) => {
     const s = makeSurface(d.name, d.oscPrefix);
     s.sensorIds = Array.isArray(d.sensorIds) ? d.sensorIds.slice() : [];
     if (d.ndi) s.ndi = Object.assign(s.ndi, d.ndi);
+    Object.assign(s.pipeline.cfg, gcfg);
     if (d.cfg) s.pipeline.setConfig(d.cfg);
     if (d.warp) s.pipeline.setWarp({ corners: d.warp.corners, enabled: d.warp.enabled });
     if (Array.isArray(d.zones)) s.pipeline.setZones(d.zones);
@@ -764,12 +807,16 @@ ipcMain.handle('lidar:sensor-enable', async (_evt, { id, on }) => {
   return { ok: true };
 });
 
-// background capture/clear for fusion: target one sensor id, or all when id omitted
+// background capture/clear for fusion: target one sensor id, or all when id omitted.
+// Each sensor's baseline is captured into the pipeline of the surface that OWNS it,
+// so background subtract works per-wall (not only on the selected surface).
 ipcMain.handle('lidar:sensor-bg', async (_evt, { id, action }) => {
   const ids = id ? [id] : [...fusionSources.keys()];
   for (const sid of ids) {
-    if (action === 'clear') pipeline.clearBackgroundSensor(sid);
-    else pipeline.captureBackgroundSensor(sid);
+    const surf = surfaceOwning(sid);
+    if (!surf) continue;
+    if (action === 'clear') surf.pipeline.clearBackgroundSensor(sid);
+    else surf.pipeline.captureBackgroundSensor(sid);
   }
   return { ok: true };
 });
@@ -984,7 +1031,10 @@ async function savePreset() {
   let state = {};
   try { state = await win.webContents.executeJavaScript('window.__collectPreset && window.__collectPreset()'); } catch (_) {}
   state = state || {};
-  state.baseline = pipeline.bgCaptured ? Array.from(pipeline.bg) : null;
+  state.baseline = pipeline.bgCaptured ? Array.from(pipeline.bg) : null; // single-sensor mode
+  // Per-sensor empty-room baselines across ALL surfaces (fusion): so background
+  // subtract auto-engages on reload without re-capturing. Keyed by sensor id.
+  state.sensorBaselines = collectSensorBaselines();
   fs.writeFileSync(res.filePath, JSON.stringify(state, null, 2));
   send('lidar:status', 'preset saved: ' + path.basename(res.filePath));
 }
@@ -998,8 +1048,12 @@ async function openPreset() {
   if (res.canceled || !res.filePaths || !res.filePaths.length) return;
   let obj;
   try { obj = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8')); } catch (e) { send('lidar:status', 'preset load failed: ' + e.message); return; }
-  if (obj.baseline) pipeline.setBaseline(obj.baseline);
   try { await win.webContents.executeJavaScript('window.__applyPreset(' + JSON.stringify(obj) + ')'); } catch (e) { send('lidar:status', 'apply failed: ' + e.message); }
+  // Restore baselines AFTER __applyPreset — it rebuilds every surface pipeline (and
+  // reconnects fusion), so baselines set earlier would be thrown away. Now they land
+  // in the CURRENT pipelines and background subtract auto-engages (no re-capture).
+  if (obj.baseline) activeSurface().pipeline.setBaseline(obj.baseline);
+  if (obj.sensorBaselines) restoreSensorBaselines(obj.sensorBaselines);
   send('lidar:status', 'preset loaded: ' + path.basename(res.filePaths[0]));
 }
 
