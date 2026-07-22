@@ -1,0 +1,111 @@
+name: Release
+
+# Triggered by pushing a version tag (e.g. v5.7.0). Builds the macOS .dmg and the
+# Windows installer + portable .exe on their own cloud runners (so native modules —
+# serialport / koffi — are compiled for the right OS, no wine needed on a Mac), then
+# publishes a GitHub Release with all three artifacts attached (permanent download
+# links, unlike the per-run artifacts of build-macos.yml / build-windows.yml).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # macos-latest ships Python 3.12+ (no distutils); node-gyp needs it to rebuild
+      # the serialport native module. Pin 3.11 (still bundles distutils).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: npm install
+      - name: Build macOS dmg
+        run: npm run dist:mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-mac
+          path: app/dist/*.dmg
+          if-no-files-found: error
+
+  win:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch & bundle NDI runtime DLL
+        shell: pwsh
+        run: |
+          if (Test-Path "ndi-runtime/win/Processing.NDI.Lib.x64.dll") {
+            Write-Host "NDI DLL already present in repo — using it."
+          } else {
+            $exe = "$env:RUNNER_TEMP\ndi_runtime.exe"
+            $urls = @("http://ndi.link/NDIRedistV6",
+                      "https://downloads.ndi.tv/Redist/NDI%206%20Runtime.exe")
+            $ok = $false
+            foreach ($u in $urls) {
+              try { Write-Host "Downloading $u"; Invoke-WebRequest -Uri $u -OutFile $exe -UseBasicParsing -MaximumRedirection 5; $ok = $true; break }
+              catch { Write-Host "  failed: $($_.Exception.Message)" }
+            }
+            if (-not $ok) { Write-Error "Could not download the NDI runtime installer"; exit 1 }
+            Write-Host "Installing NDI runtime silently..."
+            Start-Process -FilePath $exe -ArgumentList "/S","/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+            Start-Sleep -Seconds 5
+            $dll = Get-ChildItem -Path "C:\Program Files\NDI","C:\Program Files (x86)\NDI" -Recurse -Filter "Processing.NDI.Lib.x64.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $dll) { $dll = Get-ChildItem -Path "C:\Program Files" -Recurse -Filter "Processing.NDI.Lib.x64.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 }
+            if (-not $dll) { Write-Error "NDI DLL not found after install"; exit 1 }
+            New-Item -ItemType Directory -Force -Path "ndi-runtime/win" | Out-Null
+            Copy-Item $dll.FullName "ndi-runtime/win/Processing.NDI.Lib.x64.dll" -Force
+            Write-Host "Bundled NDI DLL from: $($dll.FullName)"
+          }
+      - name: Install dependencies
+        run: npm install
+      - name: Build Windows installer + portable
+        run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-win
+          path: app/dist/*.exe
+          if-no-files-found: error
+
+  release:
+    needs: [mac, win]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            artifacts/dist-mac/*.dmg \
+            artifacts/dist-win/*.exe \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "LEOXI-LIDARTRACKING ${{ github.ref_name }} — RPLIDAR + Hokuyo UST support.
+
+          Downloads:
+          - macOS (Apple Silicon): \`.dmg\`
+          - Windows: \`Setup\` installer or \`Portable\` .exe
+
+          Note: the app is not code-signed. On macOS, right-click the app → Open (first launch). On Windows, SmartScreen → More info → Run anyway."

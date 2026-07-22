@@ -2070,6 +2070,11 @@ window.__applyPreset = async function (o) {
   window.lidar.setConfig({ distMin: $('distMin').value, distMax: $('distMax').value, quality: quality });
   $('selName').textContent = (SENSORS.find(function (s) { return s.id === ui.selected; }) || { name: '' }).name;
   renderDevices();
+  // Refresh the CONNECTION panel for the selected device so its brand (RPLIDAR/Hokuyo),
+  // connType and IP/port reflect the loaded preset. Without this the global `brand` stays
+  // stale and a loaded Hokuyo could single-connect as RPLIDAR (fusion is unaffected — it
+  // reads cfgs[id].brand directly).
+  if (cfgs[ui.selected]) loadConnFields(ui.selected);
   // v3: restore the full multi-surface layout, then load the active surface's view
   if (Array.isArray(o.surfaces) && o.surfaces.length) {
     try {

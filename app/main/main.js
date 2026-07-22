@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, screen, Menu, dialog } = require('electron'
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const net = require('net');
 const { RPLidar } = require('./rplidar');
 const { Hokuyo, probe: hokuyoProbe } = require('./hokuyo');
 const { Simulator } = require('./simulator');
@@ -539,29 +540,61 @@ ipcMain.handle('lidar:list-ports', async () => {
 // Auto-detect: scan every serial port, try each candidate baudrate, and ask the
 // device to identify itself (GET_INFO). Returns the RPLIDARs it found with the
 // port + baudrate + model, so the UI can auto-fill the connection fields.
-// Scan the PC's own IPv4 /24 subnets for Hokuyo UST sensors (SCIP over TCP :10940).
-// Hokuyo is Ethernet-only, so the serial RPLIDAR probe can never find it — instead we
-// TCP-knock every host on the local subnet and keep the ones that answer PP. Only /24
-// interfaces are scanned so the sweep stays bounded (≤254 hosts), concurrency-capped.
+// Fast TCP knock: is `port` open on `host`? Resolves quickly — open→connect,
+// closed→RST, filtered→timeout after `ms`. Used to shortlist hosts before the heavier
+// SCIP identify, so the subnet sweep stays fast AND real sensors get a full handshake.
+function tcpKnock(host, port, ms) {
+  return new Promise((resolve) => {
+    let done = false;
+    const s = net.createConnection({ host, port });
+    const fin = (v) => { if (done) return; done = true; try { s.destroy(); } catch (_) {} resolve(v); };
+    s.setTimeout(ms, () => fin(false));
+    s.on('connect', () => fin(true));
+    s.on('error', () => fin(false));
+  });
+}
+
+// Find Hokuyo UST sensors on the LAN (Ethernet-only → the serial RPLIDAR probe can't
+// see them). Two phases: (1) TCP-knock every host on the PC's /24 subnet(s) to shortlist
+// those with :10940 open, then (2) run the full SCIP identify only on those, with a
+// generous timeout so a real sensor mid-handshake is never dropped. Enumerates the /24
+// around EVERY non-internal IPv4 the PC holds (regardless of exact netmask) plus the
+// factory 192.168.0.x subnet as a fallback.
 async function scanHokuyoNet(port = 10940) {
-  const hosts = new Set();
+  const bases = new Set();
+  const selfIps = new Set();
   for (const addrs of Object.values(os.networkInterfaces())) {
     for (const a of addrs || []) {
-      if (a.internal || a.family !== 'IPv4' || a.netmask !== '255.255.255.0') continue;
-      const base = a.address.slice(0, a.address.lastIndexOf('.') + 1);
-      for (let h = 1; h <= 254; h++) { const ip = base + h; if (ip !== a.address) hosts.add(ip); }
+      if (a.internal || a.family !== 'IPv4') continue;
+      selfIps.add(a.address);
+      bases.add(a.address.slice(0, a.address.lastIndexOf('.') + 1));
     }
   }
-  const list = [...hosts];
-  if (!list.length) return [];
-  send('lidar:status', `auto-detect: quét mạng ${list.length} địa chỉ (Hokuyo :${port})…`);
+  bases.add('192.168.0.'); // Hokuyo factory-default subnet, in case the PC isn't on it yet
+  const hosts = [];
+  for (const base of bases) for (let h = 1; h <= 254; h++) {
+    const ip = base + h;
+    if (!selfIps.has(ip)) hosts.push(ip);
+  }
+  if (!hosts.length) return [];
+  send('lidar:status', `auto-detect: quét mạng ${hosts.length} địa chỉ (Hokuyo :${port})…`);
+
+  // Phase 1: knock all hosts (cheap), keep those with the port open.
+  const open = [];
+  let ki = 0;
+  const knocker = async () => {
+    while (ki < hosts.length) { const ip = hosts[ki++]; if (await tcpKnock(ip, port, 300)) open.push(ip); }
+  };
+  await Promise.all(Array.from({ length: Math.min(64, hosts.length) }, knocker));
+
+  // Phase 2: full SCIP identify only on open hosts, with a generous per-host timeout.
   const found = [];
-  let idx = 0;
-  const worker = async () => {
-    while (idx < list.length) {
-      const ip = list[idx++];
+  let pi = 0;
+  const prober = async () => {
+    while (pi < open.length) {
+      const ip = open[pi++];
       let info = null;
-      try { info = await hokuyoProbe(ip, port, 350); } catch (_) {}
+      try { info = await hokuyoProbe(ip, port, 2500); } catch (_) {}
       if (info) {
         found.push({
           name: info.model || 'Hokuyo UST', model: info.model || '', firmware: info.firmware || '',
@@ -571,7 +604,7 @@ async function scanHokuyoNet(port = 10940) {
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(32, list.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(8, open.length) }, prober));
   return found;
 }
 

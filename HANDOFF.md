@@ -6,7 +6,14 @@
 
 ## App là gì
 Electron app cầu nối LiDAR → point cloud → OSC/NDI cho touch-wall (chọn cửa tương tác).
-Chạy: `cd app && npm start`. Version hiện tại: **v5.4** (xem `git log`).
+Chạy: `cd app && npm start`. Version hiện tại: **v5.7** (xem `git log`).
+
+**v5.5–v5.7 (Hokuyo):** thêm hỗ trợ Hokuyo UST-10LX/20LX (Ethernet/SCIP 2.0) song song RPLIDAR —
+driver `hokuyo.js`, nhánh fusion, UI chọn brand, network auto-detect (2 pha: TCP knock → SCIP identify),
+`tools/hokuyo-emu.js` để test không cần phần cứng. v5.7 = bản đã review kỹ + fix 7 lỗi (auto-detect bỏ sót
+sensor, probe false-positive/không bật laser, `_pending` cross-talk, buffer cap, `_mode`, preset khôi phục brand).
+Đã verify: output OSC + normalize 0-1 GIỐNG HỆT RPLIDAR (pipeline sensor-agnostic); background subtract +
+persist qua preset chạy đúng cho Hokuyo. Release build cả macOS/.dmg + Windows/.exe qua GitHub Actions (`release.yml`, tag `v*`).
 
 ## Kiến trúc (file chính, đọc khi cần)
 - `app/main/main.js` — process chính: quản lý surface, connect sensor, auto-reconnect, fusion đa cảm biến.

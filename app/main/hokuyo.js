@@ -141,6 +141,25 @@ class Hokuyo extends EventEmitter {
     return this.info;
   }
 
+  // Lightweight identify for network auto-detect. Assumes TCP is already open; does
+  // only the minimal QT→SCIP2.0→PP handshake and VALIDATES the PP reply. It does NOT
+  // turn the laser on (no BM) or start streaming (no MD), so sweeping a whole subnet
+  // is cheap and never leaves a probed sensor lasing. Throws if the host isn't a real
+  // Hokuyo (no valid PP), which is how probe() avoids false positives on port 10940.
+  async identify() {
+    this._mode = 'cmd';
+    this._writeLine('QT');
+    await delay(50);
+    this.buffer = '';
+    try { await this._command('SCIP2.0', 600); } catch (_) {}
+    const block = await this._command('PP', 1200);
+    const p = this._parseParams(block);
+    if (!p.MODL && !Number.isFinite(p.ARES)) throw new Error('không phải Hokuyo (PP không hợp lệ)');
+    this.params = p;
+    this.info = { model: p.MODL || 'Hokuyo', firmware: p.PROT || '', serial: p.SERI || '' };
+    return this.info;
+  }
+
   async disconnect() {
     if (this._diagTimer) { clearInterval(this._diagTimer); this._diagTimer = null; }
     try { this._writeLine('QT'); await delay(20); } catch (_) {}
@@ -150,7 +169,7 @@ class Hokuyo extends EventEmitter {
     this._sock = null;
     this.connected = false;
     this.buffer = '';
-    this.mode = 'cmd';
+    this._mode = 'cmd';
     this._pending = null;
   }
 
@@ -170,6 +189,7 @@ class Hokuyo extends EventEmitter {
       }, timeoutMs);
       this._pending = {
         _t: timer,
+        cmd, // SCIP echoes the command on reply line 0 — used to reject stale replies
         resolve: (block) => { clearTimeout(timer); resolve(block); },
         reject: (e) => { clearTimeout(timer); reject(e); },
       };
@@ -180,6 +200,13 @@ class Hokuyo extends EventEmitter {
   _onData(chunk) {
     this._rxBytes += chunk.length;
     this.buffer += chunk.toString('latin1');
+    // Safety: a peer that never sends the blank-line delimiter (a wrong service on
+    // :10940, a broken device) must not grow the buffer without bound. Reset + report.
+    if (this.buffer.length > 262144 && this.buffer.indexOf('\n\n') < 0) {
+      this.buffer = '';
+      this.emit('error', new Error('Hokuyo: buffer quá lớn, không thấy khung dữ liệu'));
+      return;
+    }
     // Each SCIP reply is terminated by a blank line (two consecutive LFs). Data
     // lines are never empty, so "\n\n" reliably frames a complete reply.
     let idx;
@@ -189,6 +216,12 @@ class Hokuyo extends EventEmitter {
       if (this._mode === 'scan') {
         this._handleScanBlock(block);
       } else if (this._pending) {
+        // Deliver only the pending command's OWN reply. SCIP echoes the command on
+        // line 0, so a stale/late reply for a previous (timed-out) command whose
+        // echo doesn't match is dropped, not mis-delivered to the current waiter.
+        const nl = block.indexOf('\n');
+        const echo = nl < 0 ? block : block.slice(0, nl);
+        if (this._pending.cmd && !echo.startsWith(this._pending.cmd)) continue;
         const p = this._pending; this._pending = null; p.resolve(block);
       }
       // else: stray reply in cmd mode with no waiter — drop it.
@@ -249,17 +282,27 @@ class Hokuyo extends EventEmitter {
   }
 }
 
-// Best-effort network probe: open TCP, ask PP, resolve device info (or null).
-// Mirrors rplidar.probe() so a future network auto-detect can reuse it.
-function probe(host, port = DEFAULT_PORT, timeoutMs = 1200) {
+// Best-effort network probe for auto-detect: open TCP, run the lightweight identify
+// (QT→SCIP2.0→PP, validated — NO laser/streaming), resolve device info or null.
+// Mirrors rplidar.probe(). Never a false positive: identify() throws unless a valid
+// PP came back, so a random non-Hokuyo service on :10940 resolves to null.
+function probe(host, port = DEFAULT_PORT, timeoutMs = 1500) {
   return new Promise((resolve) => {
     const dev = new Hokuyo();
     let done = false;
     const finish = (r) => { if (done) return; done = true; dev.disconnect().catch(() => {}); resolve(r); };
     const timer = setTimeout(() => finish(null), timeoutMs);
-    dev.connect({ host, port })
-      .then((info) => { clearTimeout(timer); finish(info ? { ...info, host, port, name: info.model } : null); })
-      .catch(() => { clearTimeout(timer); finish(null); });
+    (async () => {
+      try {
+        await dev._openTcp(host, port);
+        const info = await dev.identify();
+        clearTimeout(timer);
+        finish(info ? { ...info, host, port, name: info.model } : null);
+      } catch (_) {
+        clearTimeout(timer);
+        finish(null);
+      }
+    })();
   });
 }
 
