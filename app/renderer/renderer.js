@@ -1731,7 +1731,7 @@ async function fusionConnect() {
   const devices = devs.map((s) => {
     const c = cfgs[s.id];
     return {
-      id: s.id, name: s.name, connType: c.connType, comPort: c.comPort, baudrate: c.baudrate,
+      id: s.id, name: s.name, brand: c.brand, connType: c.connType, comPort: c.comPort, baudrate: c.baudrate,
       ipAddr: c.ipAddr, ipPort: c.ipPort, netProto: c.netProto, pose: poseOf(s.id),
       enabled: c.enabled !== false,
     };

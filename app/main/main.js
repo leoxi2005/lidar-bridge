@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, screen, Menu, dialog } = require('electron'
 const path = require('path');
 const fs = require('fs');
 const { RPLidar } = require('./rplidar');
+const { Hokuyo } = require('./hokuyo');
 const { Simulator } = require('./simulator');
 const { Pipeline } = require('./pipeline');
 const { OscSender, oscMessage, oscBundle } = require('./osc');
@@ -485,9 +486,10 @@ async function doReconnect() {
   while (autoReconnect && win && !win.isDestroyed()) {
     try {
       if (source) { source.removeAllListeners(); try { await source.disconnect(); } catch (_) {} source = null; }
-      source = new RPLidar();
+      source = lastConnectCfg.hokuyo ? new Hokuyo() : new RPLidar();
       wireSource(source);
-      if (lastConnectCfg.network) await source.connect({ host: lastConnectCfg.host, port: lastConnectCfg.port, udp: lastConnectCfg.udp });
+      if (lastConnectCfg.hokuyo) await source.connect({ host: lastConnectCfg.host, port: lastConnectCfg.port });
+      else if (lastConnectCfg.network) await source.connect({ host: lastConnectCfg.host, port: lastConnectCfg.port, udp: lastConnectCfg.udp });
       else await source.connect({ path: lastConnectCfg.comPort, baudRate: parseInt(lastConnectCfg.baudrate, 10) || 115200 });
       lastScanAt = Date.now();
       startSender();
@@ -589,10 +591,15 @@ ipcMain.handle('lidar:connect', async (_evt, config) => {
       startSender();
       return { ok: true, simulated: true, info };
     }
-    source = new RPLidar();
+    const isHokuyo = config.brand === 'hokuyo';
+    source = isHokuyo ? new Hokuyo() : new RPLidar();
     wireSource(source);
     let info;
-    if (config.connType === 'network') {
+    if (isHokuyo) {
+      // Hokuyo UST is Ethernet-only (SCIP 2.0 over TCP, default 192.168.0.10:10940).
+      info = await source.connect({ host: config.ipAddr, port: config.ipPort });
+      lastConnectCfg = { hokuyo: true, host: config.ipAddr, port: config.ipPort };
+    } else if (config.connType === 'network') {
       info = await source.connect({ host: config.ipAddr, port: config.ipPort, udp: config.netProto === 'udp' });
       lastConnectCfg = { network: true, host: config.ipAddr, port: config.ipPort, udp: config.netProto === 'udp' };
     } else {
@@ -640,7 +647,8 @@ ipcMain.handle('lidar:config', async (_evt, patch) => {
 async function openFusionSensor(d) {
   const id = d.id;
   const isSim = String(d.comPort).trim().toUpperCase() === 'SIM' || d.connType === 'simulator';
-  const sensor = isSim ? new Simulator() : new RPLidar();
+  const isHokuyo = d.brand === 'hokuyo';
+  const sensor = isSim ? new Simulator() : isHokuyo ? new Hokuyo() : new RPLidar();
   sensor.on('scan', (nodes) => {
     fusionScans.set(id, nodes);
     const s = fusionSources.get(id); if (s) s.lastScanAt = Date.now();
@@ -649,6 +657,8 @@ async function openFusionSensor(d) {
   sensor.on('status', (msg) => send('lidar:status', d.name + ': ' + String(msg)));
   sensor.on('error', (err) => send('lidar:status', d.name + ' ERROR: ' + err.message));
   if (isSim) await sensor.connect();
+  // Hokuyo UST is Ethernet-only (SCIP 2.0 over TCP, default 192.168.0.10:10940).
+  else if (isHokuyo) await sensor.connect({ host: d.ipAddr, port: d.ipPort });
   else if (d.connType === 'network') await sensor.connect({ host: d.ipAddr, port: d.ipPort, udp: d.netProto === 'udp' });
   else await sensor.connect({ path: d.comPort, baudRate: parseInt(d.baudrate, 10) || 1000000 });
   return sensor;
