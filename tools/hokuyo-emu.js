@@ -35,17 +35,39 @@ function reply(lines) { return lines.join('\n') + '\n\n'; }
 
 // Build the encoded body for one scan, chunked into 64-data-char lines each
 // followed by a checksum char — exactly how a real UST frames MD data.
+// Simulated venue: a RECTANGULAR room, sensor mounted mid-wall looking in.
+// For each ray we cast from the sensor and return the distance to the nearest
+// wall (or the walking person) — so the point cloud traces the ROOM's actual
+// shape, not a circle. (A constant distance in every direction is what makes a
+// circle; a real room does not do that.) Sensor at origin, front (0°) = +Y.
+const ROOM = { halfW: 4.0, depth: 6.0 }; // 8 m wide × 6 m deep
+const PERSON_R = 0.35;
+const per = 360 / PP.ARES;               // degrees per step (matches hokuyo.js)
+
+function rayDistanceM(dx, dy, px, py) {
+  let best = Infinity;
+  // three visible walls: back (y=depth), left (x=-halfW), right (x=+halfW)
+  if (dy > 1e-6) { const t = ROOM.depth / dy; if (t > 0 && Math.abs(t * dx) <= ROOM.halfW) best = Math.min(best, t); }
+  if (dx < -1e-6) { const t = -ROOM.halfW / dx; const y = t * dy; if (t > 0 && y >= 0 && y <= ROOM.depth) best = Math.min(best, t); }
+  if (dx > 1e-6) { const t = ROOM.halfW / dx; const y = t * dy; if (t > 0 && y >= 0 && y <= ROOM.depth) best = Math.min(best, t); }
+  // person = a circle the ray can hit before the wall (occludes it)
+  const b = -2 * (dx * px + dy * py);
+  const c0 = px * px + py * py - PERSON_R * PERSON_R;
+  const disc = b * b - 4 * c0;
+  if (disc >= 0) { const t = (-b - Math.sqrt(disc)) / 2; if (t > 0 && t < best) best = t; }
+  return best;
+}
+
 function scanBody(frame) {
   let enc = '';
-  const centre = PP.AFRT; // step index straight ahead
-  // A "person": a distance dip that sweeps ±400 steps around centre.
-  const personStep = centre + Math.round(380 * Math.sin(frame / 12));
+  const px = 2.2 * Math.sin(frame / 15), py = 3.0; // person walks left↔right mid-room
   for (let i = 0; i < N; i++) {
-    const step = PP.AMIN + i;
-    let d = 4000; // back wall at 4 m
-    const off = Math.abs(step - personStep);
-    if (off < 45) d = 1500 + off * 8; // a rounded body ~1.5 m away
-    d += Math.round(15 * Math.sin(i)); // a little surface noise
+    const a = (PP.AMIN + i - PP.AFRT) * per * Math.PI / 180; // ray angle, 0 = front(+Y)
+    const dx = -Math.sin(a), dy = Math.cos(a);
+    const t = rayDistanceM(dx, dy, px, py);
+    // Rays past the room edge (pointing behind the wall) get no return -> 0 (< DMIN).
+    let d = Number.isFinite(t) ? Math.round(t * 1000 + 8 * Math.sin(i)) : 0;
+    if (d < 0) d = 0;
     enc += enc3(d);
   }
   const lines = [];
