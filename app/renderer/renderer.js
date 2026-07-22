@@ -15,7 +15,7 @@ const NBINS = 720; // angle bins for the point cloud (0.5° each)
 // No hardcoded LiDAR presets — the list starts with only the simulator, and real
 // devices are added by AUTO-DETECT (which probes every COM port) or "+ ADD DEVICE"
 // (manual entry). This way the panel only ever shows devices that actually exist.
-const DEFAULT_CFG = { connType: 'serial', comPort: '', baudrate: '1000000', scanMode: 'standard', precision: '2', distMin: '0.0', distMax: '30.0', coordSys: 'cartesian', quality: false };
+const DEFAULT_CFG = { brand: 'rplidar', connType: 'serial', comPort: '', baudrate: '1000000', scanMode: 'standard', precision: '2', distMin: '0.0', distMax: '30.0', coordSys: 'cartesian', quality: false };
 const SIM_DEVICE = {
   id: 'sim', name: 'Simulator (SIM)', range: '—', hz: '10', kind: 'sim',
   cfg: Object.assign({}, DEFAULT_CFG, { comPort: 'SIM' }),
@@ -1035,6 +1035,7 @@ function loadConnFields(id) {
   $('ipPort').value = c.ipPort || '8089';
   setNetProto(c.netProto || 'udp');
   setScan(c.scanMode);
+  setBrand(c.brand || 'rplidar'); // after setConn so Hokuyo can force network view
   setPrecision(c.precision);
   $('distMin').value = c.distMin;
   $('distMax').value = c.distMax;
@@ -1164,6 +1165,7 @@ function saveConnFields(id) {
   c.ipAddr = $('ipAddr').value;
   c.ipPort = $('ipPort').value;
   c.netProto = netProto;
+  c.brand = brand;
   c.distMin = $('distMin').value;
   c.distMax = $('distMax').value;
 }
@@ -1174,7 +1176,7 @@ function segActivate(groupAttr, attr, val) {
   });
 }
 
-let connType = 'serial', scanMode = 'express', precision = '2', coordSys = 'cartesian', quality = false, netProto = 'udp';
+let connType = 'serial', scanMode = 'express', precision = '2', coordSys = 'cartesian', quality = false, netProto = 'udp', brand = 'rplidar';
 
 function setConn(v) {
   connType = v;
@@ -1182,6 +1184,24 @@ function setConn(v) {
   $('serialFields').style.display = v === 'serial' ? 'flex' : 'none';
   $('networkFields').style.display = v === 'network' ? 'flex' : 'none';
   cfgs[ui.selected].connType = v;
+}
+// RPLIDAR vs Hokuyo UST. Hokuyo speaks SCIP 2.0 over TCP only, so selecting it
+// forces the network view and hides the serial + scan-mode controls (RPLIDAR-only
+// concepts), defaulting to the UST's factory 192.168.0.10:10940.
+function setBrand(v) {
+  brand = v;
+  segActivate('data-brand', 'data-brand', v);
+  if (cfgs[ui.selected]) cfgs[ui.selected].brand = v;
+  const isH = v === 'hokuyo';
+  $('connTypeRow').style.display = isH ? 'none' : 'flex';
+  $('scanModeField').style.display = isH ? 'none' : 'block';
+  if (isH) {
+    setConn('network');
+    const ip = $('ipAddr').value.trim();
+    if (!ip || ip === '192.168.11.2') $('ipAddr').value = '192.168.0.10';
+    const pt = $('ipPort').value.trim();
+    if (!pt || pt === '8089') $('ipPort').value = '10940';
+  }
 }
 function setNetProto(v) { netProto = v; segActivate('data-net', 'data-net', v); cfgs[ui.selected].netProto = v; }
 function setScan(v) { scanMode = v; segActivate('data-scan', 'data-scan', v); cfgs[ui.selected].scanMode = v; }
@@ -1245,6 +1265,7 @@ async function doConnect() {
     distMax: $('distMax').value,
     quality,
     connType,
+    brand,
     placement: {
       x: parseFloat($('posX').value) || 0,
       y: parseFloat($('posY').value) || 0,
@@ -1287,6 +1308,7 @@ function fitView() { view.z = 1; view.panX = 0; view.panY = 0; }
 
 // ---- wiring ---------------------------------------------------------------
 function wireControls() {
+  document.querySelectorAll('[data-brand]').forEach((b) => (b.onclick = () => setBrand(b.getAttribute('data-brand'))));
   document.querySelectorAll('[data-conn]').forEach((b) => (b.onclick = () => setConn(b.getAttribute('data-conn'))));
   document.querySelectorAll('[data-net]').forEach((b) => (b.onclick = () => setNetProto(b.getAttribute('data-net'))));
   document.querySelectorAll('[data-scan]').forEach((b) => (b.onclick = () => setScan(b.getAttribute('data-scan'))));

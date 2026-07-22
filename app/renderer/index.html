@@ -149,6 +149,10 @@ select.input{ padding:0 6px; }
       <div style="padding:11px 14px 8px" class="sec-title">CONNECTION · <span id="selName">RPLIDAR A3</span></div>
       <div style="padding:0 14px;display:flex;flex-direction:column;gap:8px">
         <div class="row">
+          <button class="seg active" data-brand="rplidar">RPLIDAR</button>
+          <button class="seg" data-brand="hokuyo">HOKUYO</button>
+        </div>
+        <div id="connTypeRow" class="row">
           <button class="seg active" data-conn="serial">SERIAL</button>
           <button class="seg" data-conn="network">NETWORK</button>
         </div>
@@ -180,7 +184,7 @@ select.input{ padding:0 6px; }
             <button class="seg" data-net="udp">UDP</button>
           </div>
         </div>
-        <label class="field"><span class="lbl">SCAN MODE</span>
+        <label id="scanModeField" class="field"><span class="lbl">SCAN MODE</span>
           <div class="row">
             <button class="seg" data-scan="standard">STANDARD</button>
             <button class="seg active" data-scan="express">EXPRESS</button>
