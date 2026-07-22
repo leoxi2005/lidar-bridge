@@ -1195,6 +1195,7 @@ function setBrand(v) {
   const isH = v === 'hokuyo';
   $('connTypeRow').style.display = isH ? 'none' : 'flex';
   $('scanModeField').style.display = isH ? 'none' : 'block';
+  $('netProtoRow').style.display = isH ? 'none' : 'flex'; // Hokuyo is TCP-only
   if (isH) {
     setConn('network');
     const ip = $('ipAddr').value.trim();
