@@ -2,8 +2,9 @@
 const { app, BrowserWindow, ipcMain, screen, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { RPLidar } = require('./rplidar');
-const { Hokuyo } = require('./hokuyo');
+const { Hokuyo, probe: hokuyoProbe } = require('./hokuyo');
 const { Simulator } = require('./simulator');
 const { Pipeline } = require('./pipeline');
 const { OscSender, oscMessage, oscBundle } = require('./osc');
@@ -538,33 +539,74 @@ ipcMain.handle('lidar:list-ports', async () => {
 // Auto-detect: scan every serial port, try each candidate baudrate, and ask the
 // device to identify itself (GET_INFO). Returns the RPLIDARs it found with the
 // port + baudrate + model, so the UI can auto-fill the connection fields.
-ipcMain.handle('lidar:autodetect', async () => {
-  if (source) return { ok: false, error: 'Đang kết nối — hãy DISCONNECT trước khi dò.' };
-  let SerialPort, probe;
-  try {
-    ({ SerialPort } = require('serialport'));
-    ({ probe } = require('./rplidar'));
-  } catch (e) {
-    return { ok: false, error: 'serial unavailable: ' + e.message };
-  }
-  let ports = [];
-  try { ports = await SerialPort.list(); } catch (_) {}
-  // Skip obvious non-sensor ports (Bluetooth/debug) to keep the scan quick.
-  const candidates = ports
-    .map((p) => p.path)
-    .filter((path) => path && !/Bluetooth|debug-console/i.test(path));
-  send('lidar:status', `auto-detect: quét ${candidates.length} cổng…`);
-  const bauds = [1000000, 256000, 115200]; // S2/S3 first, then A3/S1, then A1/A2
-  const found = [];
-  for (const path of candidates) {
-    for (const baud of bauds) {
-      send('lidar:status', `auto-detect: thử ${path} @ ${baud}…`);
-      let info = null;
-      try { info = await probe(path, baud); } catch (_) {}
-      if (info) { found.push(info); break; } // got it — next port
+// Scan the PC's own IPv4 /24 subnets for Hokuyo UST sensors (SCIP over TCP :10940).
+// Hokuyo is Ethernet-only, so the serial RPLIDAR probe can never find it — instead we
+// TCP-knock every host on the local subnet and keep the ones that answer PP. Only /24
+// interfaces are scanned so the sweep stays bounded (≤254 hosts), concurrency-capped.
+async function scanHokuyoNet(port = 10940) {
+  const hosts = new Set();
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.internal || a.family !== 'IPv4' || a.netmask !== '255.255.255.0') continue;
+      const base = a.address.slice(0, a.address.lastIndexOf('.') + 1);
+      for (let h = 1; h <= 254; h++) { const ip = base + h; if (ip !== a.address) hosts.add(ip); }
     }
   }
-  send('lidar:status', found.length ? `auto-detect: tìm thấy ${found.length} thiết bị` : 'auto-detect: không thấy RPLIDAR nào');
+  const list = [...hosts];
+  if (!list.length) return [];
+  send('lidar:status', `auto-detect: quét mạng ${list.length} địa chỉ (Hokuyo :${port})…`);
+  const found = [];
+  let idx = 0;
+  const worker = async () => {
+    while (idx < list.length) {
+      const ip = list[idx++];
+      let info = null;
+      try { info = await hokuyoProbe(ip, port, 350); } catch (_) {}
+      if (info) {
+        found.push({
+          name: info.model || 'Hokuyo UST', model: info.model || '', firmware: info.firmware || '',
+          brand: 'hokuyo', network: true, ipAddr: ip, ipPort: port, path: 'hokuyo@' + ip,
+        });
+        send('lidar:status', `auto-detect: Hokuyo ${info.model || ''} @ ${ip}`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(32, list.length) }, worker));
+  return found;
+}
+
+ipcMain.handle('lidar:autodetect', async () => {
+  if (source) return { ok: false, error: 'Đang kết nối — hãy DISCONNECT trước khi dò.' };
+  const found = [];
+
+  // 1) RPLIDAR over serial (USB). Tolerate a missing serial stack — we still net-scan.
+  try {
+    const { SerialPort } = require('serialport');
+    const { probe } = require('./rplidar');
+    let ports = [];
+    try { ports = await SerialPort.list(); } catch (_) {}
+    // Skip obvious non-sensor ports (Bluetooth/debug) to keep the scan quick.
+    const candidates = ports
+      .map((p) => p.path)
+      .filter((path) => path && !/Bluetooth|debug-console/i.test(path));
+    send('lidar:status', `auto-detect: quét ${candidates.length} cổng COM…`);
+    const bauds = [1000000, 256000, 115200]; // S2/S3 first, then A3/S1, then A1/A2
+    for (const path of candidates) {
+      for (const baud of bauds) {
+        send('lidar:status', `auto-detect: thử ${path} @ ${baud}…`);
+        let info = null;
+        try { info = await probe(path, baud); } catch (_) {}
+        if (info) { found.push(info); break; } // got it — next port
+      }
+    }
+  } catch (e) {
+    send('lidar:status', 'auto-detect: bỏ qua serial (' + e.message + ')');
+  }
+
+  // 2) Hokuyo over the network (the serial probe can't see these).
+  try { for (const h of await scanHokuyoNet(10940)) found.push(h); } catch (_) {}
+
+  send('lidar:status', found.length ? `auto-detect: tìm thấy ${found.length} thiết bị` : 'auto-detect: không thấy sensor nào');
   return { ok: true, devices: found };
 });
 

@@ -44,15 +44,21 @@ function applyDetected(found) {
   SENSORS = SENSORS.filter((s) => s.kind === 'sim' || s.kind === 'manual');
   for (const d of found) {
     const id = devIdForPath(d.path);
+    const isHokuyo = d.brand === 'hokuyo';
+    // Hokuyo (network) vs RPLIDAR (serial) carry different connection fields.
+    const cfgPatch = isHokuyo
+      ? { brand: 'hokuyo', connType: 'network', ipAddr: d.ipAddr, ipPort: String(d.ipPort) }
+      : { brand: 'rplidar', comPort: d.path, baudrate: String(d.baudrate) };
+    const range = isHokuyo
+      ? (/20/.test(d.model || '') ? '20m' : '10m')
+      : (d.baudrate >= 1000000 ? '30m' : d.baudrate >= 256000 ? '25m' : '12m');
     const dev = {
-      id, name: d.name, kind: 'detected',
-      range: d.baudrate >= 1000000 ? '30m' : d.baudrate >= 256000 ? '25m' : '12m', hz: '10',
-      firmware: d.firmware,
-      cfg: Object.assign({}, DEFAULT_CFG, { comPort: d.path, baudrate: String(d.baudrate) }),
+      id, name: d.name, kind: 'detected', range, hz: '10', firmware: d.firmware,
+      cfg: Object.assign({}, DEFAULT_CFG, cfgPatch),
     };
     if (SENSORS.find((s) => s.id === id)) { // already present — refresh its name/cfg
       const ex = SENSORS.find((s) => s.id === id); ex.name = dev.name; ex.firmware = dev.firmware;
-      Object.assign(cfgs[id], { comPort: d.path, baudrate: String(d.baudrate) });
+      Object.assign(cfgs[id], cfgPatch);
     } else {
       SENSORS.push(dev);
       cfgs[id] = Object.assign({}, dev.cfg);
@@ -969,9 +975,11 @@ function renderDevices() {
     const c = cfgs[s.id];
     const addr = s.kind === 'sim' ? 'built-in' : c.connType === 'serial' ? (c.comPort || '—') : (c.ipAddr || 'NET');
     const conn = s.kind === 'sim' ? 'SIM' : c.connType === 'serial' ? 'SERIAL' : 'NET';
-    const meta = s.kind === 'detected'
+    const meta = s.kind === 'detected' && c.connType === 'serial'
       ? `<span>${conn} ${addr}</span><span>baud ${c.baudrate}</span>`
-      : `<span>${conn} ${addr}</span>`;
+      : c.connType !== 'serial' && s.kind !== 'sim'
+        ? `<span>${conn} ${addr}:${c.ipPort || ''}</span>`
+        : `<span>${conn} ${addr}</span>`;
     const needsFill = s.kind === 'manual' && !c.comPort && c.connType === 'serial';
     const sub = s.kind === 'sim'
       ? `<span>built-in simulator</span>`
@@ -1918,20 +1926,22 @@ async function autoDetect() {
   const label = btn.textContent;
   btn.textContent = '⏳ ĐANG DÒ…';
   box.style.display = 'block';
-  box.textContent = 'Đang quét các cổng COM và thử baudrate…';
+  box.textContent = 'Đang quét cổng COM (RPLIDAR) và mạng LAN (Hokuyo :10940)…';
   await refreshPorts();
   try {
     const res = await window.lidar.autodetect();
     if (!res.ok) { box.textContent = '⚠ ' + (res.error || 'lỗi dò'); return; }
     if (!res.devices || !res.devices.length) {
-      box.innerHTML = '✕ Không thấy RPLIDAR.\nKiểm tra: cáp/đổi cổng USB · đã cài driver CP210x/CH340 · không có app khác (RoboStudio) đang giữ cổng.';
+      box.innerHTML = '✕ Không thấy sensor nào.\nRPLIDAR: kiểm cáp/cổng USB · driver CP210x/CH340 · không app khác giữ cổng.\nHokuyo: PC cùng subnet 192.168.0.x · sensor đã cấp nguồn · đúng port 10940.';
       return;
     }
     // Put every detected LiDAR into the DEVICES list so the user can pick one.
     applyDetected(res.devices);
     const n = res.devices.length;
-    let html = `✓ Tìm thấy <span style="color:#39ff7a">${n}</span> LiDAR — xem ở danh sách <b>DEVICES</b> phía trên, bấm chọn rồi <b>CONNECT</b>.\n`;
-    html += res.devices.map((x) => `   • ${x.name} · ${x.path} @ ${x.baudrate}`).join('\n');
+    let html = `✓ Tìm thấy <span style="color:#39ff7a">${n}</span> sensor — xem ở danh sách <b>DEVICES</b> phía trên, bấm chọn rồi <b>CONNECT</b> (hoặc <b>FUSION</b> nếu nhiều con).\n`;
+    html += res.devices.map((x) => x.brand === 'hokuyo'
+      ? `   • ${x.name} · ${x.ipAddr}:${x.ipPort} (Hokuyo)`
+      : `   • ${x.name} · ${x.path} @ ${x.baudrate}`).join('\n');
     box.innerHTML = html;
   } catch (e) {
     box.textContent = '⚠ lỗi: ' + e.message;
