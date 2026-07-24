@@ -6,10 +6,16 @@
 
 ---
 
-## ▶️ BẮT ĐẦU SESSION MỚI (tiết kiệm token) — dán đúng câu này
+## ▶️ BẮT ĐẦU SESSION MỚI (tiết kiệm token)
+**Bước 1 — mở Claude Code ĐÚNG trong folder dự án** (Terminal):
 ```
-Đọc HANDOFF.md để nắm context (đừng đọc git log / lịch sử cũ, đừng --resume session cũ),
-rồi làm tiếp: <MÔ TẢ VIỆC CẦN LÀM>
+cd /Users/macos/Downloads/design_handoff_lidar_bridge
+claude
+```
+**Bước 2 — dán đúng câu này** (đã ghi full path để chắc chắn tìm thấy file dù mở ở đâu):
+```
+Đọc /Users/macos/Downloads/design_handoff_lidar_bridge/HANDOFF.md để nắm context
+(đừng đọc git log / lịch sử cũ, đừng --resume session cũ), rồi làm tiếp: <MÔ TẢ VIỆC CẦN LÀM>
 ```
 Quy tắc giữ token thấp:
 - KHÔNG `--resume` session cũ. Mỗi lần mở session mới + đọc HANDOFF.md.
