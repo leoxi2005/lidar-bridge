@@ -226,6 +226,7 @@ function fusionTick() {
       });
     }
   }
+  emitZonecal(); // ~1 Hz zone bounding-box broadcast for the display app
   const nowMs = Date.now();
   if (oscLog.length && nowMs - lastLogAt > 140) { lastLogAt = nowMs; send('lidar:osc-log', oscLog); }
 }
@@ -267,6 +268,41 @@ function emitSurfaceOsc(surf, log) {
     let line = `${surf.name}  →  ${base}/count ${ts.length}`;
     ts.slice(0, 4).forEach((t, i) => { const [a, b] = coord(t); line += `   p${i}(${a.toFixed(2)},${b.toFixed(2)})`; });
     log.push(line);
+  }
+}
+
+// Zone calibration broadcast for a display app (Door Portals) to overlay zone
+// positions WITHOUT touching each. For every zone, project its polygon through the
+// surface's warp homography into normalized wall coords [0,1] (same u,v space as the
+// touch /pN/x·y output, so overlays line up with real touches) and send its bounding
+// box: /zonecal/<prefix>/<slug>  fx0 fx1 fy0 fy1  (four FLOATs, 0..1). Rate-limited to
+// ~1 Hz so it also reflects live zone dragging. fx = along-wall (0 left → 1 right),
+// fy = height (uses the SAME vertical convention as /pN/y — calibrate warp so 0 = floor).
+let lastZonecalAt = 0;
+function emitZonecal(force) {
+  if (!sender || outCfg.protocol !== 'osc') return;
+  const now = Date.now();
+  if (!force && now - lastZonecalAt < 1000) return;
+  lastZonecalAt = now;
+  const list = (fusionMode || surfaces.length > 1) ? surfaces : [activeSurface()];
+  const clamp = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  for (const s of list) {
+    if (!s) continue;
+    const pfx = (s.oscPrefix || 'lidar').replace(/^\/+|\/+$/g, '') || 'lidar';
+    const H = s.pipeline.warpH;
+    for (const z of s.pipeline.zones) {
+      if (!z.pts || z.pts.length < 2) continue;
+      let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+      for (const p of z.pts) {
+        const uv = applyH(H, p[0], p[1]);
+        if (uv[0] < minU) minU = uv[0]; if (uv[0] > maxU) maxU = uv[0];
+        if (uv[1] < minV) minV = uv[1]; if (uv[1] > maxV) maxV = uv[1];
+      }
+      sender.sendMessage(`/zonecal/${pfx}/${z.slug}`, [
+        { type: 'f', value: clamp(minU) }, { type: 'f', value: clamp(maxU) },
+        { type: 'f', value: clamp(minV) }, { type: 'f', value: clamp(maxV) },
+      ]);
+    }
   }
 }
 
@@ -387,6 +423,7 @@ function stopSender() {
 
 function emitOutput() {
   if (!source) return; // in FUSION mode emitSurfaceOsc() is the sole OSC sender (per-surface prefix)
+  emitZonecal(); // ~1 Hz zone bounding-box broadcast (single-sensor path)
   const lines = [];
   // Coordinate is normalized u,v in [0,1] when warp "apply to output" is on (step 7),
   // otherwise raw world metres.

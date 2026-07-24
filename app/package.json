@@ -1,6 +1,6 @@
 {
   "name": "leoxi-lidartracking",
-  "version": "5.7.0",
+  "version": "5.8.0",
   "description": "LEOXI-LIDARTRACKING — 2D LiDAR tracking → TouchDesigner",
   "main": "main/main.js",
   "scripts": {

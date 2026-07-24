@@ -15,6 +15,10 @@ sensor, probe false-positive/không bật laser, `_pending` cross-talk, buffer c
 Đã verify: output OSC + normalize 0-1 GIỐNG HỆT RPLIDAR (pipeline sensor-agnostic); background subtract +
 persist qua preset chạy đúng cho Hokuyo. Release build cả macOS/.dmg + Windows/.exe qua GitHub Actions (`release.yml`, tag `v*`).
 
+**v5.8:** thêm OSC `/zonecal/<prefix>/<slug>  fx0 fx1 fy0 fy1` (4 float 0..1) — bbox mỗi zone chiếu qua warp
+(cùng hệ u,v với toạ độ chạm), gửi ~1Hz để app hiển thị (Door Portals) vẽ chồng vị trí ô cửa. Hàm `emitZonecal()`
+trong `main.js`, gắn vào cả `fusionTick()` lẫn `emitOutput()`. Door Portals v1.0.2 đã đọc format này.
+
 ## Kiến trúc (file chính, đọc khi cần)
 - `app/main/main.js` — process chính: quản lý surface, connect sensor, auto-reconnect, fusion đa cảm biến.
 - `app/main/rplidar.js` — driver RPLIDAR (giao thức nhị phân Slamtec).
